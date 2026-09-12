@@ -57,3 +57,25 @@ AI를 사용해 도메인 경계, API 응답 구조, 내부 식별자, 실패 �
 2. 별도 포트의 최소 Mock Supplier를 구현한다.
 3. 카탈로그 매핑과 동기화를 구현한다.
 4. `docs/implementation-plan.md` 순서대로 검색 흐름을 완성한다.
+
+## 2026-09-13 - 기반 환경 구성
+
+### 수행 내용
+
+- PostgreSQL 로컬 실행 환경을 Compose로 구성했다.
+- Flyway가 스키마 변경을 전달하도록 설정했다.
+- Hibernate는 스키마 생성 대신 검증만 수행하도록 설정했다.
+- 테스트가 개발자 로컬 DB에 의존하지 않도록 Testcontainers PostgreSQL을 연결했다.
+- 애플리케이션 실행 모델을 Spring MVC로 명시했다.
+
+### 의사결정
+
+- 제품 DB와 테스트 DB의 동작 차이를 줄이기 위해 H2 대신 PostgreSQL Testcontainers를 사용했다.
+- 로컬 애플리케이션 실행은 상태를 유지할 수 있는 Compose DB를 사용하고, 테스트는 매번 격리되는 임시 DB를 사용한다.
+- 스키마 변경 이력을 코드와 함께 추적하기 위해 Hibernate 자동 생성 대신 Flyway를 사용한다.
+
+### 검증 결과
+
+- `./gradlew test`: 성공
+- `docker compose up -d --wait`: 성공
+- `/actuator/health`: `UP`
