@@ -79,3 +79,15 @@ AI를 사용해 도메인 경계, API 응답 구조, 내부 식별자, 실패 �
 - `./gradlew test`: 성공
 - `docker compose up -d --wait`: 성공
 - `/actuator/health`: `UP`
+
+## 2026-09-13 - Mock Supplier 구성
+
+- 실제 애플리케이션과 다른 포트에서 실행되는 Mock 모듈을 추가했다.
+- 두 Supplier의 목록 및 재고·요금 API를 고정 응답으로 구성했다.
+- 정상, HTTP 오류, 본문 오류, 무응답 상황을 재현할 수 있게 했다.
+- 후속 연동 개발에서 실제 HTTP 통신과 부분 실패를 검증하기 위해 Mock을 먼저 구현했다.
+
+### 검증
+
+- `./gradlew test`: 성공
+- 정상, 장애, 무응답 시나리오 확인

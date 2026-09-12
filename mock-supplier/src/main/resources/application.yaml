@@ -1,0 +1,9 @@
+spring:
+  application:
+    name: mock-supplier
+  main:
+    web-application-type: servlet
+
+server:
+  port: ${MOCK_SUPPLIER_PORT:18080}
+  shutdown: graceful
