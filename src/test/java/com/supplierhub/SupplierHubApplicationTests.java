@@ -6,7 +6,7 @@ import org.springframework.boot.testcontainers.service.connection.ServiceConnect
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.postgresql.PostgreSQLContainer;
 
-@SpringBootTest
+@SpringBootTest(properties = "supplier.catalog.enabled=false")
 class SupplierHubApplicationTests {
 
 	@Container

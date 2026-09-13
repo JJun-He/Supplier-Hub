@@ -5,14 +5,27 @@ import java.util.Optional;
 
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 
 import com.supplierhub.catalog.domain.RoomType;
+import com.supplierhub.catalog.domain.Supplier;
 
 public interface RoomTypeRepository extends JpaRepository<RoomType, Long> {
 
 	Optional<RoomType> findByPropertyIdAndSupplierRoomTypeCode(
 		Long propertyId,
 		String supplierRoomTypeCode
+	);
+
+	@Query("""
+		select roomType
+		from RoomType roomType
+		join fetch roomType.property property
+		where property.supplier = :supplier
+		order by property.id, roomType.id
+		""")
+	List<RoomType> findAllBySupplierOrderByPropertyAndId(
+		@Param("supplier") Supplier supplier
 	);
 
 	@Query("""

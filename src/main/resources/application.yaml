@@ -33,3 +33,19 @@ management:
     web:
       exposure:
         include: health, info
+
+supplier:
+  a:
+    base-url: ${SUPPLIER_A_BASE_URL:http://localhost:18080}
+    api-key: ${SUPPLIER_A_API_KEY:mock-a-key}
+  b:
+    base-url: ${SUPPLIER_B_BASE_URL:http://localhost:18080}
+    api-key: ${SUPPLIER_B_API_KEY:mock-b-key}
+  catalog:
+    enabled: ${SUPPLIER_CATALOG_ENABLED:true}
+    connect-timeout: ${SUPPLIER_CATALOG_CONNECT_TIMEOUT:500ms}
+    response-timeout: ${SUPPLIER_CATALOG_RESPONSE_TIMEOUT:3s}
+    max-retries: ${SUPPLIER_CATALOG_MAX_RETRIES:2}
+    retry-backoff: ${SUPPLIER_CATALOG_RETRY_BACKOFF:300ms}
+    initial-delay: ${SUPPLIER_CATALOG_INITIAL_DELAY:0}
+    fixed-delay: ${SUPPLIER_CATALOG_FIXED_DELAY:10m}

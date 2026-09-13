@@ -1,0 +1,13 @@
+package com.supplierhub.supplier.common;
+
+public enum SupplierFailureType {
+
+	INVALID_REQUEST,
+	AUTHENTICATION_FAILED,
+	RATE_LIMITED,
+	UNAVAILABLE,
+	TIMEOUT,
+	INVALID_RESPONSE,
+	UNKNOWN
+
+}
