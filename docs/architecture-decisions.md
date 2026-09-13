@@ -157,10 +157,13 @@ Supplier 코드는 연동 계층의 데이터다. 고객 응답에는 내부 ID�
 > 요청한 숙박 기간 동안 객실 1실을 이용할 때 고객이 결제하는 세금 포함 전체 금액
 
 ```text
+Money
+- currency: ISO 4217 Currency
+- amount: 통화 최소 단위 long
+
 Price
-- currency
-- totalAmount
-- nightlyBreakdown: optional
+- totalAmount: Money
+- nightlyBreakdown: optional List<NightlyPrice>
 ```
 
 날짜별 세전 가격과 세금을 주는 Supplier는 각 날짜의 두 값을 더한 뒤 숙박일 전체를 합산한다. 이미 세금이 포함된 숙박 전체 총액을 주는 Supplier는 그 값을 그대로 사용한다.
@@ -174,9 +177,9 @@ Supplier가 날짜별 상세를 제공하면 Supplier DTO를 그대로 보존하
 ```text
 NightlyPrice
 - date
-- baseAmount
-- taxAmount
-- totalAmount
+- baseAmount: Money
+- taxAmount: Money
+- totalAmount: baseAmount + taxAmount
 ```
 
 모든 Supplier가 날짜별 가격을 제공하는 것은 아니므로 이 정보는 선택 값이다.
@@ -237,7 +240,13 @@ Supplier가 반환한 ISO 4217 통화와 해당 통화의 최소 단위 정수�
 - 요청 인원을 수용할 수 없는 객실
 - Supplier 규약과 맞지 않는 상품 값
 
-정상인 형제 Offer는 유지한다. 하나 이상의 Offer가 제외되면 해당 Supplier 결과를 `PARTIAL`로 표시하고, 수용·제외 개수와 공통 실패 유형을 제공한다.
+정상인 형제 Offer는 유지한다. 하나 이상의 Offer가 제외되면 이후 통합 검색 서비스가 해당 Supplier 결과를 `PARTIAL`로 표시하고, 수용·제외 개수와 공통 실패 유형을 제공한다. Offer 도메인은 Supplier 상태를 직접 계산하지 않는다.
+
+Offer 정규화 결과는 예약 가능한 Offer 목록, 잘못되어 거부된 Offer 수, 정상 데이터지만 품절이라 제외된 Offer 수를 구분한다. 품절은 Supplier 데이터 오류로 세지 않으며, 거부 건수가 있으면 이후 통합 검색 서비스가 공통 실패 유형 `INVALID_RESPONSE`와 `PARTIAL` 상태를 계산한다.
+
+Supplier 어댑터는 원본 응답 항목, 호출 출처 Supplier, 변환 함수를 정규화 경계에 전달한다. DTO 검증부터 `Money`, `Price`, `OfferCandidate`, `Offer` 생성까지 후보별 보호 구간 안에서 실행하여 잘못된 통화나 음수 금액처럼 중간 값 생성 중 발생한 오류도 형제 Offer와 격리한다. 거부된 후보는 application 계층에서 호출 출처 Supplier, 후보 Supplier, 항목 순번, 사용 가능한 내부 식별자와 예외를 구조화 로그로 남긴다. 호출 출처와 후보 Supplier가 다르면 계약 위반으로 거부한다.
+
+`OfferCandidate`는 도메인 변환이 끝난 완전한 후보이므로 생성 시 필수 값과 컬렉션을 검증한다. 최종 `Offer`는 검증 팩토리만 사용할 수 있는 private 생성자의 불변 객체로 두어 검색 조건과 날짜 검증을 우회할 수 없게 한다.
 
 고객 응답에는 Supplier 원본 코드나 내부 예외 메시지를 노출하지 않는다. 상세 원인은 구조화 로그에 남긴다.
 
