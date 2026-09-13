@@ -175,6 +175,11 @@ class SupplierCatalogClientTests {
 				2,
 				Duration.ofMillis(10),
 				Duration.ofMinutes(10)
+			),
+			new SupplierIntegrationProperties.Search(
+				Duration.ofMillis(500),
+				Duration.ofSeconds(1),
+				Duration.ofSeconds(2)
 			)
 		);
 		SupplierClientConfiguration configuration = new SupplierClientConfiguration();

@@ -19,6 +19,7 @@ import com.supplierhub.catalog.domain.Supplier;
 import com.supplierhub.supplier.common.SupplierCatalogClient;
 import com.supplierhub.supplier.common.SupplierFailureType;
 import com.supplierhub.supplier.common.SupplierIntegrationException;
+import com.supplierhub.supplier.common.SupplierTransportFailureMapper;
 
 @Component
 public class SupplierBCatalogClient implements SupplierCatalogClient {
@@ -49,11 +50,9 @@ public class SupplierBCatalogClient implements SupplierCatalogClient {
 			.map(this::toSnapshot)
 			.onErrorMap(
 				WebClientRequestException.class,
-				cause -> new SupplierIntegrationException(
+				cause -> SupplierTransportFailureMapper.requestFailure(
 					supplier(),
-					SupplierFailureType.UNAVAILABLE,
-					true,
-					"Supplier B catalog request failed",
+					"Supplier B catalog request",
 					cause
 				)
 			)
@@ -131,6 +130,9 @@ public class SupplierBCatalogClient implements SupplierCatalogClient {
 	}
 
 	private SupplierIntegrationException bodyFailure(String resultCode) {
+		if (resultCode == null) {
+			return invalidResponse();
+		}
 		SupplierFailureType failureType = switch (resultCode) {
 			case "E400" -> SupplierFailureType.INVALID_REQUEST;
 			case "E401" -> SupplierFailureType.AUTHENTICATION_FAILED;

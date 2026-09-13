@@ -1,5 +1,7 @@
 package com.supplierhub.supplier.common;
 
+import java.time.Duration;
+
 import io.netty.channel.ChannelOption;
 import reactor.netty.http.client.HttpClient;
 
@@ -20,26 +22,59 @@ public class SupplierClientConfiguration {
 	@Bean
 	@Qualifier("supplierAWebClient")
 	WebClient supplierAWebClient(SupplierIntegrationProperties properties) {
-		return createWebClient(WebClient.builder(), properties.a(), properties.catalog());
+		return createWebClient(
+			WebClient.builder(),
+			properties.a(),
+			properties.catalog().connectTimeout(),
+			properties.catalog().responseTimeout()
+		);
 	}
 
 	@Bean
 	@Qualifier("supplierBWebClient")
 	WebClient supplierBWebClient(SupplierIntegrationProperties properties) {
-		return createWebClient(WebClient.builder(), properties.b(), properties.catalog());
+		return createWebClient(
+			WebClient.builder(),
+			properties.b(),
+			properties.catalog().connectTimeout(),
+			properties.catalog().responseTimeout()
+		);
+	}
+
+	@Bean
+	@Qualifier("supplierASearchWebClient")
+	WebClient supplierASearchWebClient(SupplierIntegrationProperties properties) {
+		return createWebClient(
+			WebClient.builder(),
+			properties.a(),
+			properties.search().connectTimeout(),
+			properties.search().responseTimeout()
+		);
+	}
+
+	@Bean
+	@Qualifier("supplierBSearchWebClient")
+	WebClient supplierBSearchWebClient(SupplierIntegrationProperties properties) {
+		return createWebClient(
+			WebClient.builder(),
+			properties.b(),
+			properties.search().connectTimeout(),
+			properties.search().responseTimeout()
+		);
 	}
 
 	private WebClient createWebClient(
 		WebClient.Builder builder,
 		SupplierIntegrationProperties.Endpoint endpoint,
-		SupplierIntegrationProperties.Catalog catalog
+		Duration connectTimeout,
+		Duration responseTimeout
 	) {
 		HttpClient httpClient = HttpClient.create()
 			.option(
 				ChannelOption.CONNECT_TIMEOUT_MILLIS,
-				Math.toIntExact(catalog.connectTimeout().toMillis())
+				Math.toIntExact(connectTimeout.toMillis())
 			)
-			.responseTimeout(catalog.responseTimeout());
+			.responseTimeout(responseTimeout);
 
 		return builder.clone()
 			.baseUrl(endpoint.baseUrl().toString())

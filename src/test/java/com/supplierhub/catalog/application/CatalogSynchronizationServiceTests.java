@@ -113,6 +113,11 @@ class CatalogSynchronizationServiceTests {
 				2,
 				Duration.ofMillis(1),
 				Duration.ofMinutes(10)
+			),
+			new SupplierIntegrationProperties.Search(
+				Duration.ofMillis(100),
+				Duration.ofSeconds(1),
+				Duration.ofSeconds(2)
 			)
 		);
 		return new CatalogSynchronizationService(clients, store, properties);

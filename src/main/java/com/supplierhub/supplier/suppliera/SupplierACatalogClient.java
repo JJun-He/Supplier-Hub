@@ -19,6 +19,7 @@ import com.supplierhub.catalog.domain.Supplier;
 import com.supplierhub.supplier.common.SupplierCatalogClient;
 import com.supplierhub.supplier.common.SupplierFailureType;
 import com.supplierhub.supplier.common.SupplierIntegrationException;
+import com.supplierhub.supplier.common.SupplierTransportFailureMapper;
 
 @Component
 public class SupplierACatalogClient implements SupplierCatalogClient {
@@ -47,11 +48,9 @@ public class SupplierACatalogClient implements SupplierCatalogClient {
 			.map(this::toSnapshot)
 			.onErrorMap(
 				WebClientRequestException.class,
-				cause -> new SupplierIntegrationException(
+				cause -> SupplierTransportFailureMapper.requestFailure(
 					supplier(),
-					SupplierFailureType.UNAVAILABLE,
-					true,
-					"Supplier A catalog request failed",
+					"Supplier A catalog request",
 					cause
 				)
 			)

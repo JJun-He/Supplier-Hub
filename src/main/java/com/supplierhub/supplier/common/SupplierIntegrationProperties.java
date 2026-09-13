@@ -9,7 +9,8 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 public record SupplierIntegrationProperties(
 	Endpoint a,
 	Endpoint b,
-	Catalog catalog
+	Catalog catalog,
+	Search search
 ) {
 
 	public record Endpoint(
@@ -25,6 +26,13 @@ public record SupplierIntegrationProperties(
 		int maxRetries,
 		Duration retryBackoff,
 		Duration fixedDelay
+	) {
+	}
+
+	public record Search(
+		Duration connectTimeout,
+		Duration responseTimeout,
+		Duration callTimeout
 	) {
 	}
 

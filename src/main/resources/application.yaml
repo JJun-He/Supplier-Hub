@@ -49,3 +49,7 @@ supplier:
     retry-backoff: ${SUPPLIER_CATALOG_RETRY_BACKOFF:300ms}
     initial-delay: ${SUPPLIER_CATALOG_INITIAL_DELAY:0}
     fixed-delay: ${SUPPLIER_CATALOG_FIXED_DELAY:10m}
+  search:
+    connect-timeout: ${SUPPLIER_SEARCH_CONNECT_TIMEOUT:500ms}
+    response-timeout: ${SUPPLIER_SEARCH_RESPONSE_TIMEOUT:2s}
+    call-timeout: ${SUPPLIER_SEARCH_CALL_TIMEOUT:3s}
