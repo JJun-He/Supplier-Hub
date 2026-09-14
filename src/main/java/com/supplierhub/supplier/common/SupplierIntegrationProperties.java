@@ -30,6 +30,7 @@ public record SupplierIntegrationProperties(
 		boolean enabled,
 		@NotNull Duration connectTimeout,
 		@NotNull Duration responseTimeout,
+		@NotNull Duration callTimeout,
 		@PositiveOrZero int maxRetries,
 		@NotNull Duration retryBackoff,
 		@NotNull Duration initialDelay,
@@ -40,6 +41,7 @@ public record SupplierIntegrationProperties(
 		public boolean isDurationConfigurationValid() {
 			return isPositive(connectTimeout)
 				&& isPositive(responseTimeout)
+				&& isPositive(callTimeout)
 				&& isPositive(retryBackoff)
 				&& isNonNegative(initialDelay)
 				&& isPositive(fixedDelay);

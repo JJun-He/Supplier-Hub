@@ -93,9 +93,41 @@ class CatalogSynchronizationServiceTests {
 			.contains("IllegalStateException: database write failed");
 	}
 
+	@Test
+	void timesOutEachCatalogAttemptAndRetriesIt(CapturedOutput output) {
+		AtomicInteger attempts = new AtomicInteger();
+		SupplierCatalogClient client = client(
+			Supplier.SUPPLIER_A,
+			Mono.defer(() -> {
+				attempts.incrementAndGet();
+				return Mono.never();
+			})
+		);
+		RecordingSnapshotStore store = new RecordingSnapshotStore();
+		CatalogSynchronizationService service = service(
+			List.of(client),
+			store,
+			Duration.ofMillis(20)
+		);
+
+		service.synchronizeAll();
+
+		assertThat(attempts).hasValue(3);
+		assertThat(store.snapshots).isEmpty();
+		assertThat(output).contains("failureType=TIMEOUT");
+	}
+
 	private CatalogSynchronizationService service(
 		List<SupplierCatalogClient> clients,
 		CatalogSnapshotStore store
+	) {
+		return service(clients, store, Duration.ofSeconds(2));
+	}
+
+	private CatalogSynchronizationService service(
+		List<SupplierCatalogClient> clients,
+		CatalogSnapshotStore store,
+		Duration callTimeout
 	) {
 		SupplierIntegrationProperties properties = new SupplierIntegrationProperties(
 			new SupplierIntegrationProperties.Endpoint(
@@ -110,6 +142,7 @@ class CatalogSynchronizationServiceTests {
 				true,
 				Duration.ofMillis(100),
 				Duration.ofSeconds(1),
+				callTimeout,
 				2,
 				Duration.ofMillis(1),
 				Duration.ZERO,

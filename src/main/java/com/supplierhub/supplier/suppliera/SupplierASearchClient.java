@@ -26,6 +26,7 @@ import com.supplierhub.search.domain.NightlyPrice;
 import com.supplierhub.search.domain.OfferCandidate;
 import com.supplierhub.search.domain.Price;
 import com.supplierhub.supplier.common.SupplierFailureType;
+import com.supplierhub.supplier.common.SupplierHttpFailureMapper;
 import com.supplierhub.supplier.common.SupplierIntegrationException;
 import com.supplierhub.supplier.common.SupplierIntegrationProperties;
 import com.supplierhub.supplier.common.SupplierSearchClient;
@@ -208,20 +209,10 @@ public class SupplierASearchClient implements SupplierSearchClient {
 	}
 
 	private Mono<? extends Throwable> httpFailure(ClientResponse response) {
-		int status = response.statusCode().value();
-		SupplierFailureType failureType = switch (status) {
-			case 400 -> SupplierFailureType.INVALID_REQUEST;
-			case 401 -> SupplierFailureType.AUTHENTICATION_FAILED;
-			case 429 -> SupplierFailureType.RATE_LIMITED;
-			default -> status >= 500
-				? SupplierFailureType.UNAVAILABLE
-				: SupplierFailureType.UNKNOWN;
-		};
-		return Mono.error(new SupplierIntegrationException(
+		return Mono.error(SupplierHttpFailureMapper.statusFailure(
 			supplier(),
-			failureType,
-			status >= 500,
-			"Supplier A search returned an error status"
+			response.statusCode(),
+			"Supplier A search"
 		));
 	}
 

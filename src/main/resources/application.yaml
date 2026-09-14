@@ -44,6 +44,7 @@ supplier:
     enabled: ${SUPPLIER_CATALOG_ENABLED:true}
     connect-timeout: ${SUPPLIER_CATALOG_CONNECT_TIMEOUT:500ms}
     response-timeout: ${SUPPLIER_CATALOG_RESPONSE_TIMEOUT:3s}
+    call-timeout: ${SUPPLIER_CATALOG_CALL_TIMEOUT:4s}
     max-retries: ${SUPPLIER_CATALOG_MAX_RETRIES:2}
     retry-backoff: ${SUPPLIER_CATALOG_RETRY_BACKOFF:300ms}
     initial-delay: ${SUPPLIER_CATALOG_INITIAL_DELAY:0}

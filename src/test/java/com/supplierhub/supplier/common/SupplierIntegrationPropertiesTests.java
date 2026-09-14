@@ -64,11 +64,45 @@ class SupplierIntegrationPropertiesTests {
 		assertThat(validator.validate(properties)).isEmpty();
 	}
 
+	@Test
+	void rejectsNonPositiveCatalogCallTimeout() {
+		SupplierIntegrationProperties properties = new SupplierIntegrationProperties(
+			new SupplierIntegrationProperties.Endpoint(
+				URI.create("http://localhost"),
+				"a-key"
+			),
+			new SupplierIntegrationProperties.Endpoint(
+				URI.create("http://localhost"),
+				"b-key"
+			),
+			new SupplierIntegrationProperties.Catalog(
+				true,
+				Duration.ofMillis(500),
+				Duration.ofSeconds(3),
+				Duration.ZERO,
+				2,
+				Duration.ofMillis(300),
+				Duration.ZERO,
+				Duration.ofMinutes(10)
+			),
+			new SupplierIntegrationProperties.Search(
+				Duration.ofMillis(500),
+				Duration.ofSeconds(2),
+				Duration.ofSeconds(3)
+			)
+		);
+
+		assertThat(validator.validate(properties))
+			.extracting(violation -> violation.getPropertyPath().toString())
+			.contains("catalog.durationConfigurationValid");
+	}
+
 	private SupplierIntegrationProperties.Catalog validCatalog() {
 		return new SupplierIntegrationProperties.Catalog(
 			true,
 			Duration.ofMillis(500),
 			Duration.ofSeconds(3),
+			Duration.ofSeconds(4),
 			2,
 			Duration.ofMillis(300),
 			Duration.ZERO,

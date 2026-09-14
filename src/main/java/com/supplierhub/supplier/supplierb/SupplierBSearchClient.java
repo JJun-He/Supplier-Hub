@@ -25,6 +25,7 @@ import com.supplierhub.search.domain.Money;
 import com.supplierhub.search.domain.OfferCandidate;
 import com.supplierhub.search.domain.Price;
 import com.supplierhub.supplier.common.SupplierFailureType;
+import com.supplierhub.supplier.common.SupplierHttpFailureMapper;
 import com.supplierhub.supplier.common.SupplierIntegrationException;
 import com.supplierhub.supplier.common.SupplierIntegrationProperties;
 import com.supplierhub.supplier.common.SupplierSearchClient;
@@ -200,13 +201,10 @@ public class SupplierBSearchClient implements SupplierSearchClient {
 	}
 
 	private Mono<? extends Throwable> httpFailure(ClientResponse response) {
-		return Mono.error(new SupplierIntegrationException(
+		return Mono.error(SupplierHttpFailureMapper.statusFailure(
 			supplier(),
-			response.statusCode().is5xxServerError()
-				? SupplierFailureType.UNAVAILABLE
-				: SupplierFailureType.UNKNOWN,
-			response.statusCode().is5xxServerError(),
-			"Supplier B search returned an unexpected HTTP status"
+			response.statusCode(),
+			"Supplier B search"
 		));
 	}
 

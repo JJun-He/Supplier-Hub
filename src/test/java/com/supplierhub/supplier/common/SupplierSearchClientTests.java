@@ -239,6 +239,29 @@ class SupplierSearchClientTests {
 		assertThat(requestCount).hasValue(1);
 	}
 
+	@Test
+	void supplierBClassifiesHttpRateLimitWithoutRetrying() {
+		respondWith(429, "{}");
+		SupplierBSearchClient client = supplierBClient(Duration.ofSeconds(2));
+
+		assertThatThrownBy(() -> client.search(request(
+			Supplier.SUPPLIER_B,
+			102,
+			"B77120",
+			202,
+			"R-401"
+		)).block(Duration.ofSeconds(2)))
+			.isInstanceOfSatisfying(
+				SupplierIntegrationException.class,
+				exception -> {
+					assertThat(exception.getFailureType())
+						.isEqualTo(SupplierFailureType.RATE_LIMITED);
+					assertThat(exception.isRetryable()).isFalse();
+				}
+			);
+		assertThat(requestCount).hasValue(1);
+	}
+
 	private SupplierASearchClient supplierAClient(Duration callTimeout) {
 		SupplierIntegrationProperties properties = properties(callTimeout);
 		SupplierClientConfiguration configuration = new SupplierClientConfiguration();
@@ -268,6 +291,7 @@ class SupplierSearchClientTests {
 				true,
 				Duration.ofMillis(500),
 				Duration.ofSeconds(1),
+				Duration.ofSeconds(2),
 				2,
 				Duration.ofMillis(10),
 				Duration.ZERO,

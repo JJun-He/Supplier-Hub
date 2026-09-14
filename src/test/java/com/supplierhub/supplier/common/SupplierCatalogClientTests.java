@@ -161,6 +161,24 @@ class SupplierCatalogClientTests {
 			);
 	}
 
+	@Test
+	void supplierBClassifiesHttpAuthenticationFailure() {
+		respondWith(401, "{}");
+		SupplierBCatalogClient client = new SupplierBCatalogClient(
+			webClient(false, "b-test-key")
+		);
+
+		assertThatThrownBy(() -> client.fetchCatalog().block(Duration.ofSeconds(2)))
+			.isInstanceOfSatisfying(
+				SupplierIntegrationException.class,
+				exception -> {
+					assertThat(exception.getFailureType())
+						.isEqualTo(SupplierFailureType.AUTHENTICATION_FAILED);
+					assertThat(exception.isRetryable()).isFalse();
+				}
+			);
+	}
+
 	private WebClient webClient(boolean supplierA, String apiKey) {
 		URI baseUrl = URI.create(
 			"http://127.0.0.1:" + server.getAddress().getPort()
@@ -172,6 +190,7 @@ class SupplierCatalogClientTests {
 				true,
 				Duration.ofMillis(500),
 				Duration.ofSeconds(1),
+				Duration.ofSeconds(2),
 				2,
 				Duration.ofMillis(10),
 				Duration.ZERO,

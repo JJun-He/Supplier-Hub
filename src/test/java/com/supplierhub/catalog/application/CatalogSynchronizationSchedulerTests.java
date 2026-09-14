@@ -12,6 +12,8 @@ import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.util.TestPropertyValues;
 import org.springframework.context.annotation.AnnotationConfigApplicationContext;
 
+import com.supplierhub.SchedulingConfiguration;
+
 class CatalogSynchronizationSchedulerTests {
 
 	@Test
@@ -38,7 +40,10 @@ class CatalogSynchronizationSchedulerTests {
 				CatalogSynchronizationService.class,
 				() -> service
 			);
-			context.register(CatalogSynchronizationScheduler.class);
+			context.register(
+				SchedulingConfiguration.class,
+				CatalogSynchronizationScheduler.class
+			);
 			context.refresh();
 
 			assertThat(synchronizationStarted.await(2, TimeUnit.SECONDS)).isTrue();

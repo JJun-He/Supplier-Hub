@@ -18,6 +18,7 @@ import com.supplierhub.catalog.domain.CatalogSnapshot.CatalogRoomType;
 import com.supplierhub.catalog.domain.Supplier;
 import com.supplierhub.supplier.common.SupplierCatalogClient;
 import com.supplierhub.supplier.common.SupplierFailureType;
+import com.supplierhub.supplier.common.SupplierHttpFailureMapper;
 import com.supplierhub.supplier.common.SupplierIntegrationException;
 import com.supplierhub.supplier.common.SupplierTransportFailureMapper;
 
@@ -77,22 +78,10 @@ public class SupplierACatalogClient implements SupplierCatalogClient {
 	}
 
 	private Mono<? extends Throwable> httpFailure(ClientResponse response) {
-		int status = response.statusCode().value();
-		SupplierFailureType failureType = switch (status) {
-			case 400 -> SupplierFailureType.INVALID_REQUEST;
-			case 401 -> SupplierFailureType.AUTHENTICATION_FAILED;
-			case 429 -> SupplierFailureType.RATE_LIMITED;
-			default -> status >= 500
-				? SupplierFailureType.UNAVAILABLE
-				: SupplierFailureType.UNKNOWN;
-		};
-		boolean retryable = status >= 500;
-
-		return Mono.error(new SupplierIntegrationException(
+		return Mono.error(SupplierHttpFailureMapper.statusFailure(
 			supplier(),
-			failureType,
-			retryable,
-			"Supplier A catalog returned an error status"
+			response.statusCode(),
+			"Supplier A catalog"
 		));
 	}
 

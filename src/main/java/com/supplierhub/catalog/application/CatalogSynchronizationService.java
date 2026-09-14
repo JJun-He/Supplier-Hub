@@ -16,6 +16,7 @@ import com.supplierhub.supplier.common.SupplierCatalogClient;
 import com.supplierhub.supplier.common.SupplierFailureType;
 import com.supplierhub.supplier.common.SupplierIntegrationException;
 import com.supplierhub.supplier.common.SupplierIntegrationProperties;
+import com.supplierhub.supplier.common.SupplierTransportFailureMapper;
 
 @Service
 public class CatalogSynchronizationService {
@@ -26,6 +27,7 @@ public class CatalogSynchronizationService {
 
 	private final List<SupplierCatalogClient> clients;
 	private final CatalogSnapshotStore snapshotStore;
+	private final Duration callTimeout;
 	private final int maxRetries;
 	private final Duration retryBackoff;
 
@@ -38,6 +40,7 @@ public class CatalogSynchronizationService {
 			.sorted(Comparator.comparing(SupplierCatalogClient::supplier))
 			.toList();
 		this.snapshotStore = snapshotStore;
+		this.callTimeout = properties.catalog().callTimeout();
 		this.maxRetries = properties.catalog().maxRetries();
 		this.retryBackoff = properties.catalog().retryBackoff();
 	}
@@ -51,6 +54,16 @@ public class CatalogSynchronizationService {
 	private void synchronize(SupplierCatalogClient client) {
 		try {
 			CatalogSnapshot snapshot = client.fetchCatalog()
+				.timeout(callTimeout)
+				.onErrorMap(
+					cause -> !(cause instanceof SupplierIntegrationException)
+						&& SupplierTransportFailureMapper.isTimeout(cause),
+					cause -> SupplierTransportFailureMapper.timeoutFailure(
+						client.supplier(),
+						"Supplier catalog request",
+						cause
+					)
+				)
 				.retryWhen(Retry.backoff(maxRetries, retryBackoff)
 					.filter(this::isRetryable)
 					.onRetryExhaustedThrow((spec, signal) -> signal.failure()))

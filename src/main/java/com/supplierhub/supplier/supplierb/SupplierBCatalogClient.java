@@ -18,6 +18,7 @@ import com.supplierhub.catalog.domain.CatalogSnapshot.CatalogRoomType;
 import com.supplierhub.catalog.domain.Supplier;
 import com.supplierhub.supplier.common.SupplierCatalogClient;
 import com.supplierhub.supplier.common.SupplierFailureType;
+import com.supplierhub.supplier.common.SupplierHttpFailureMapper;
 import com.supplierhub.supplier.common.SupplierIntegrationException;
 import com.supplierhub.supplier.common.SupplierTransportFailureMapper;
 
@@ -79,13 +80,10 @@ public class SupplierBCatalogClient implements SupplierCatalogClient {
 	}
 
 	private Mono<? extends Throwable> httpFailure(ClientResponse response) {
-		return Mono.error(new SupplierIntegrationException(
+		return Mono.error(SupplierHttpFailureMapper.statusFailure(
 			supplier(),
-			response.statusCode().is5xxServerError()
-				? SupplierFailureType.UNAVAILABLE
-				: SupplierFailureType.UNKNOWN,
-			response.statusCode().is5xxServerError(),
-			"Supplier B catalog returned an unexpected HTTP status"
+			response.statusCode(),
+			"Supplier B catalog"
 		));
 	}
 
