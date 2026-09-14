@@ -184,8 +184,8 @@ class SupplierCatalogClientTests {
 			"http://127.0.0.1:" + server.getAddress().getPort()
 		);
 		SupplierIntegrationProperties properties = new SupplierIntegrationProperties(
-			new SupplierIntegrationProperties.Endpoint(baseUrl, apiKey),
-			new SupplierIntegrationProperties.Endpoint(baseUrl, apiKey),
+			new SupplierIntegrationProperties.Endpoint(true, baseUrl, apiKey),
+			new SupplierIntegrationProperties.Endpoint(true, baseUrl, apiKey),
 			new SupplierIntegrationProperties.Catalog(
 				true,
 				Duration.ofMillis(500),
@@ -194,18 +194,22 @@ class SupplierCatalogClientTests {
 				2,
 				Duration.ofMillis(10),
 				Duration.ZERO,
-				Duration.ofMinutes(10)
+				Duration.ofMinutes(10),
+				10,
+				0.5
 			),
 			new SupplierIntegrationProperties.Search(
 				Duration.ofMillis(500),
 				Duration.ofSeconds(1),
-				Duration.ofSeconds(2)
+				Duration.ofSeconds(2),
+				Duration.ofSeconds(5),
+				4
 			)
 		);
 		SupplierClientConfiguration configuration = new SupplierClientConfiguration();
 		return supplierA
-			? configuration.supplierAWebClient(properties)
-			: configuration.supplierBWebClient(properties);
+			? configuration.supplierAWebClient(WebClient.builder(), properties)
+			: configuration.supplierBWebClient(WebClient.builder(), properties);
 	}
 
 	private void respondWith(int status, String body) {

@@ -14,7 +14,7 @@ public record SupplierSearchRequest(
 	List<PropertyMapping> properties
 ) {
 
-	private static final int MAX_PROPERTY_COUNT = 50;
+	public static final int MAX_PROPERTY_COUNT = 50;
 
 	public SupplierSearchRequest {
 		Objects.requireNonNull(supplier, "supplier must not be null");

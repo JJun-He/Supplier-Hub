@@ -35,9 +35,11 @@ management:
 
 supplier:
   a:
+    enabled: ${SUPPLIER_A_ENABLED:true}
     base-url: ${SUPPLIER_A_BASE_URL:http://localhost:18080}
     api-key: ${SUPPLIER_A_API_KEY:mock-a-key}
   b:
+    enabled: ${SUPPLIER_B_ENABLED:true}
     base-url: ${SUPPLIER_B_BASE_URL:http://localhost:18080}
     api-key: ${SUPPLIER_B_API_KEY:mock-b-key}
   catalog:
@@ -49,7 +51,11 @@ supplier:
     retry-backoff: ${SUPPLIER_CATALOG_RETRY_BACKOFF:300ms}
     initial-delay: ${SUPPLIER_CATALOG_INITIAL_DELAY:0}
     fixed-delay: ${SUPPLIER_CATALOG_FIXED_DELAY:10m}
+    bulk-missing-minimum-count: ${SUPPLIER_CATALOG_BULK_MISSING_MINIMUM_COUNT:10}
+    maximum-missing-ratio: ${SUPPLIER_CATALOG_MAXIMUM_MISSING_RATIO:0.5}
   search:
     connect-timeout: ${SUPPLIER_SEARCH_CONNECT_TIMEOUT:500ms}
     response-timeout: ${SUPPLIER_SEARCH_RESPONSE_TIMEOUT:2s}
     call-timeout: ${SUPPLIER_SEARCH_CALL_TIMEOUT:3s}
+    overall-timeout: ${SUPPLIER_SEARCH_OVERALL_TIMEOUT:5s}
+    max-concurrency: ${SUPPLIER_SEARCH_MAX_CONCURRENCY:4}

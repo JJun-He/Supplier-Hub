@@ -60,9 +60,7 @@ class OfferNormalizerTests {
 	}
 
 	@Test
-	void keepsValidSiblingAndLogsWhenAnotherOfferIsInvalid(
-		CapturedOutput output
-	) {
+	void excludesCapacityMismatchWithoutTreatingItAsInvalid() {
 		OfferCandidate valid = candidate(2, totalPrice(), 3, 1, 5);
 		OfferCandidate invalid = candidate(1, totalPrice(), 3, 1, 5);
 
@@ -73,14 +71,9 @@ class OfferNormalizerTests {
 		);
 
 		assertThat(result.offers()).hasSize(1);
-		assertThat(result.rejectedOfferCount()).isEqualTo(1);
-		assertThat(result.hasRejectedOffers()).isTrue();
-		assertThat(result.unavailableOfferCount()).isZero();
-		assertThat(output)
-			.contains("itemIndex=1")
-			.contains("sourceSupplier=SUPPLIER_B")
-			.contains("candidateSupplier=SUPPLIER_B")
-			.contains("maxOccupancy must cover the requested guests");
+		assertThat(result.rejectedOfferCount()).isZero();
+		assertThat(result.hasRejectedOffers()).isFalse();
+		assertThat(result.unavailableOfferCount()).isEqualTo(1);
 	}
 
 	@Test

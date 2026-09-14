@@ -117,6 +117,31 @@ class CatalogSynchronizationServiceTests {
 		assertThat(output).contains("failureType=TIMEOUT");
 	}
 
+	@Test
+	void doesNotSynchronizeDisabledSupplier() {
+		AtomicInteger attempts = new AtomicInteger();
+		SupplierCatalogClient client = client(
+			Supplier.SUPPLIER_A,
+			Mono.defer(() -> {
+				attempts.incrementAndGet();
+				return Mono.just(emptySnapshot(Supplier.SUPPLIER_A));
+			})
+		);
+		RecordingSnapshotStore store = new RecordingSnapshotStore();
+		CatalogSynchronizationService service = service(
+			List.of(client),
+			store,
+			Duration.ofSeconds(2),
+			false,
+			true
+		);
+
+		service.synchronizeAll();
+
+		assertThat(attempts).hasValue(0);
+		assertThat(store.snapshots).isEmpty();
+	}
+
 	private CatalogSynchronizationService service(
 		List<SupplierCatalogClient> clients,
 		CatalogSnapshotStore store
@@ -129,12 +154,24 @@ class CatalogSynchronizationServiceTests {
 		CatalogSnapshotStore store,
 		Duration callTimeout
 	) {
+		return service(clients, store, callTimeout, true, true);
+	}
+
+	private CatalogSynchronizationService service(
+		List<SupplierCatalogClient> clients,
+		CatalogSnapshotStore store,
+		Duration callTimeout,
+		boolean supplierAEnabled,
+		boolean supplierBEnabled
+	) {
 		SupplierIntegrationProperties properties = new SupplierIntegrationProperties(
 			new SupplierIntegrationProperties.Endpoint(
+				supplierAEnabled,
 				URI.create("http://localhost"),
 				"key"
 			),
 			new SupplierIntegrationProperties.Endpoint(
+				supplierBEnabled,
 				URI.create("http://localhost"),
 				"key"
 			),
@@ -146,12 +183,16 @@ class CatalogSynchronizationServiceTests {
 				2,
 				Duration.ofMillis(1),
 				Duration.ZERO,
-				Duration.ofMinutes(10)
+				Duration.ofMinutes(10),
+				10,
+				0.5
 			),
 			new SupplierIntegrationProperties.Search(
 				Duration.ofMillis(100),
 				Duration.ofSeconds(1),
-				Duration.ofSeconds(2)
+				Duration.ofSeconds(2),
+				Duration.ofSeconds(5),
+				4
 			)
 		);
 		return new CatalogSynchronizationService(clients, store, properties);

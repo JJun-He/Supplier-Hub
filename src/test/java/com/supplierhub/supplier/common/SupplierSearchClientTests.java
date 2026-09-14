@@ -21,6 +21,7 @@ import com.sun.net.httpserver.HttpServer;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.springframework.web.reactive.function.client.WebClient;
 
 import com.supplierhub.catalog.domain.Supplier;
 import com.supplierhub.search.domain.SearchCriteria;
@@ -266,7 +267,10 @@ class SupplierSearchClientTests {
 		SupplierIntegrationProperties properties = properties(callTimeout);
 		SupplierClientConfiguration configuration = new SupplierClientConfiguration();
 		return new SupplierASearchClient(
-			configuration.supplierASearchWebClient(properties),
+			configuration.supplierASearchWebClient(
+				WebClient.builder(),
+				properties
+			),
 			properties
 		);
 	}
@@ -275,7 +279,10 @@ class SupplierSearchClientTests {
 		SupplierIntegrationProperties properties = properties(callTimeout);
 		SupplierClientConfiguration configuration = new SupplierClientConfiguration();
 		return new SupplierBSearchClient(
-			configuration.supplierBSearchWebClient(properties),
+			configuration.supplierBSearchWebClient(
+				WebClient.builder(),
+				properties
+			),
 			properties
 		);
 	}
@@ -285,8 +292,8 @@ class SupplierSearchClientTests {
 			"http://127.0.0.1:" + server.getAddress().getPort()
 		);
 		return new SupplierIntegrationProperties(
-			new SupplierIntegrationProperties.Endpoint(baseUrl, "a-test-key"),
-			new SupplierIntegrationProperties.Endpoint(baseUrl, "b-test-key"),
+			new SupplierIntegrationProperties.Endpoint(true, baseUrl, "a-test-key"),
+			new SupplierIntegrationProperties.Endpoint(true, baseUrl, "b-test-key"),
 			new SupplierIntegrationProperties.Catalog(
 				true,
 				Duration.ofMillis(500),
@@ -295,12 +302,16 @@ class SupplierSearchClientTests {
 				2,
 				Duration.ofMillis(10),
 				Duration.ZERO,
-				Duration.ofMinutes(10)
+				Duration.ofMinutes(10),
+				10,
+				0.5
 			),
 			new SupplierIntegrationProperties.Search(
 				Duration.ofMillis(500),
 				Duration.ofSeconds(1),
-				callTimeout
+				callTimeout,
+				Duration.ofSeconds(5),
+				4
 			)
 		);
 	}

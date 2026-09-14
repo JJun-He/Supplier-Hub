@@ -11,6 +11,7 @@ import org.springframework.dao.DataIntegrityViolationException;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.postgresql.PostgreSQLContainer;
 
+import com.supplierhub.catalog.application.ActiveCatalogMapping;
 import com.supplierhub.catalog.domain.Property;
 import com.supplierhub.catalog.domain.RoomType;
 import com.supplierhub.catalog.domain.Supplier;
@@ -139,7 +140,7 @@ class CatalogRepositoryTests {
 			property.getId(),
 			"ROOM-1"
 		)).isPresent();
-		assertThat(roomTypeRepository.findAllActiveForSearch()).isEmpty();
+		assertThat(roomTypeRepository.findAllActiveMappingsForSearch()).isEmpty();
 	}
 
 	@Test
@@ -163,7 +164,39 @@ class CatalogRepositoryTests {
 			property.getId(),
 			"ROOM-1"
 		)).isPresent();
-		assertThat(roomTypeRepository.findAllActiveForSearch()).isEmpty();
+		assertThat(roomTypeRepository.findAllActiveMappingsForSearch()).isEmpty();
+	}
+
+	@Test
+	void readsOnlyIdentifiersAndSupplierCodesForActiveSearchMappings() {
+		Property property = propertyRepository.save(Property.create(
+			Supplier.SUPPLIER_A,
+			"PROPERTY-1",
+			"Property"
+		));
+		RoomType activeRoomType = roomTypeRepository.save(RoomType.create(
+			property,
+			"ROOM-1",
+			"Active Room",
+			2
+		));
+		RoomType inactiveRoomType = roomTypeRepository.save(RoomType.create(
+			property,
+			"ROOM-2",
+			"Inactive Room",
+			4
+		));
+		inactiveRoomType.deactivate();
+		roomTypeRepository.flush();
+
+		assertThat(roomTypeRepository.findAllActiveMappingsForSearch())
+			.containsExactly(new ActiveCatalogMapping(
+				property.getId(),
+				Supplier.SUPPLIER_A,
+				"PROPERTY-1",
+				activeRoomType.getId(),
+				"ROOM-1"
+			));
 	}
 
 }

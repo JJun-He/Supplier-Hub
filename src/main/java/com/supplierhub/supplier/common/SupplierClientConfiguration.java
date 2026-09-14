@@ -21,9 +21,12 @@ public class SupplierClientConfiguration {
 
 	@Bean
 	@Qualifier("supplierAWebClient")
-	WebClient supplierAWebClient(SupplierIntegrationProperties properties) {
+	WebClient supplierAWebClient(
+		WebClient.Builder builder,
+		SupplierIntegrationProperties properties
+	) {
 		return createWebClient(
-			WebClient.builder(),
+			builder,
 			properties.a(),
 			properties.catalog().connectTimeout(),
 			properties.catalog().responseTimeout()
@@ -32,9 +35,12 @@ public class SupplierClientConfiguration {
 
 	@Bean
 	@Qualifier("supplierBWebClient")
-	WebClient supplierBWebClient(SupplierIntegrationProperties properties) {
+	WebClient supplierBWebClient(
+		WebClient.Builder builder,
+		SupplierIntegrationProperties properties
+	) {
 		return createWebClient(
-			WebClient.builder(),
+			builder,
 			properties.b(),
 			properties.catalog().connectTimeout(),
 			properties.catalog().responseTimeout()
@@ -43,9 +49,12 @@ public class SupplierClientConfiguration {
 
 	@Bean
 	@Qualifier("supplierASearchWebClient")
-	WebClient supplierASearchWebClient(SupplierIntegrationProperties properties) {
+	WebClient supplierASearchWebClient(
+		WebClient.Builder builder,
+		SupplierIntegrationProperties properties
+	) {
 		return createWebClient(
-			WebClient.builder(),
+			builder,
 			properties.a(),
 			properties.search().connectTimeout(),
 			properties.search().responseTimeout()
@@ -54,9 +63,12 @@ public class SupplierClientConfiguration {
 
 	@Bean
 	@Qualifier("supplierBSearchWebClient")
-	WebClient supplierBSearchWebClient(SupplierIntegrationProperties properties) {
+	WebClient supplierBSearchWebClient(
+		WebClient.Builder builder,
+		SupplierIntegrationProperties properties
+	) {
 		return createWebClient(
-			WebClient.builder(),
+			builder,
 			properties.b(),
 			properties.search().connectTimeout(),
 			properties.search().responseTimeout()
@@ -76,7 +88,7 @@ public class SupplierClientConfiguration {
 			)
 			.responseTimeout(responseTimeout);
 
-		return builder.clone()
+		return builder
 			.baseUrl(endpoint.baseUrl().toString())
 			.defaultHeader(HttpHeaders.ACCEPT, "application/json")
 			.defaultHeader(API_KEY_HEADER, endpoint.apiKey())

@@ -57,9 +57,7 @@ public final class Offer {
 		Objects.requireNonNull(criteria, "criteria must not be null");
 		Objects.requireNonNull(price, "price must not be null");
 		if (maxOccupancy < criteria.guestCount()) {
-			throw new IllegalArgumentException(
-				"maxOccupancy must cover the requested guests"
-			);
+			return Optional.empty();
 		}
 
 		price.requireCoverage(criteria);

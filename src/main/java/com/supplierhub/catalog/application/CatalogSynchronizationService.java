@@ -37,6 +37,7 @@ public class CatalogSynchronizationService {
 		SupplierIntegrationProperties properties
 	) {
 		this.clients = clients.stream()
+			.filter(client -> properties.isEnabled(client.supplier()))
 			.sorted(Comparator.comparing(SupplierCatalogClient::supplier))
 			.toList();
 		this.snapshotStore = snapshotStore;

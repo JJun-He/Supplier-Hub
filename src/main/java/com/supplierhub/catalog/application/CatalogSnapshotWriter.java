@@ -6,6 +6,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.stream.Collectors;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -17,6 +18,7 @@ import com.supplierhub.catalog.domain.Property;
 import com.supplierhub.catalog.domain.RoomType;
 import com.supplierhub.catalog.infrastructure.PropertyRepository;
 import com.supplierhub.catalog.infrastructure.RoomTypeRepository;
+import com.supplierhub.supplier.common.SupplierIntegrationProperties;
 
 @Service
 public class CatalogSnapshotWriter implements CatalogSnapshotStore {
@@ -25,13 +27,19 @@ public class CatalogSnapshotWriter implements CatalogSnapshotStore {
 
 	private final PropertyRepository propertyRepository;
 	private final RoomTypeRepository roomTypeRepository;
+	private final int bulkMissingMinimumCount;
+	private final double maximumMissingRatio;
 
 	public CatalogSnapshotWriter(
 		PropertyRepository propertyRepository,
-		RoomTypeRepository roomTypeRepository
+		RoomTypeRepository roomTypeRepository,
+		SupplierIntegrationProperties properties
 	) {
 		this.propertyRepository = propertyRepository;
 		this.roomTypeRepository = roomTypeRepository;
+		this.bulkMissingMinimumCount = properties.catalog()
+			.bulkMissingMinimumCount();
+		this.maximumMissingRatio = properties.catalog().maximumMissingRatio();
 	}
 
 	@Override
@@ -167,6 +175,40 @@ public class CatalogSnapshotWriter implements CatalogSnapshotStore {
 			);
 		}
 
+		ensureBulkMissingIsSafe(
+			"properties",
+			existingPropertyList.stream()
+				.filter(Property::isActive)
+				.map(Property::getSupplierPropertyCode)
+				.collect(Collectors.toSet()),
+			snapshot.properties().stream()
+				.map(CatalogProperty::supplierPropertyCode)
+				.collect(Collectors.toSet())
+		);
+
+		Set<RoomTypeKey> existingActiveRoomTypes = existingRoomTypes.values()
+			.stream()
+			.flatMap(List::stream)
+			.filter(roomType -> roomType.isActive()
+				&& roomType.getProperty().isActive())
+			.map(roomType -> new RoomTypeKey(
+				roomType.getProperty().getSupplierPropertyCode(),
+				roomType.getSupplierRoomTypeCode()
+			))
+			.collect(Collectors.toSet());
+		Set<RoomTypeKey> snapshotRoomTypes = snapshot.properties().stream()
+			.flatMap(property -> property.roomTypes().stream()
+				.map(roomType -> new RoomTypeKey(
+					property.supplierPropertyCode(),
+					roomType.supplierRoomTypeCode()
+				)))
+			.collect(Collectors.toSet());
+		ensureBulkMissingIsSafe(
+			"room types",
+			existingActiveRoomTypes,
+			snapshotRoomTypes
+		);
+
 		for (CatalogProperty catalogProperty : snapshot.properties()) {
 			Property existingProperty = existingProperties.get(
 				catalogProperty.supplierPropertyCode()
@@ -184,6 +226,30 @@ public class CatalogSnapshotWriter implements CatalogSnapshotStore {
 					"Empty room type catalog cannot replace active mappings"
 				);
 			}
+		}
+	}
+
+	private <T> void ensureBulkMissingIsSafe(
+		String mappingType,
+		Set<T> existingActiveMappings,
+		Set<T> snapshotMappings
+	) {
+		if (existingActiveMappings.isEmpty()) {
+			return;
+		}
+		long missingCount = existingActiveMappings.stream()
+			.filter(mapping -> !snapshotMappings.contains(mapping))
+			.count();
+		double missingRatio = (double) missingCount
+			/ existingActiveMappings.size();
+		if (missingCount >= bulkMissingMinimumCount
+			&& missingRatio > maximumMissingRatio) {
+			throw new CatalogSnapshotRejectedException(
+				"Bulk missing " + mappingType + " rejected: missing="
+					+ missingCount + ", active="
+					+ existingActiveMappings.size() + ", ratio="
+					+ missingRatio
+			);
 		}
 	}
 
@@ -212,6 +278,12 @@ public class CatalogSnapshotWriter implements CatalogSnapshotStore {
 			).add(roomType);
 		}
 		return grouped;
+	}
+
+	private record RoomTypeKey(
+		String supplierPropertyCode,
+		String supplierRoomTypeCode
+	) {
 	}
 
 	private static final class CatalogChangeSummary {

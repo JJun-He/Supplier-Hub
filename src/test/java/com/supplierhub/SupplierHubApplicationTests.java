@@ -7,6 +7,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.ApplicationContext;
 import org.springframework.scheduling.annotation.ScheduledAnnotationBeanPostProcessor;
+import org.springframework.web.reactive.function.client.WebClient;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.postgresql.PostgreSQLContainer;
@@ -26,6 +27,7 @@ class SupplierHubApplicationTests {
 		assertThat(applicationContext.getBeansOfType(
 			ScheduledAnnotationBeanPostProcessor.class
 		)).isNotEmpty();
+		assertThat(applicationContext.getBean(WebClient.Builder.class)).isNotNull();
 	}
 
 }

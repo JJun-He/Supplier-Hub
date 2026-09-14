@@ -4,12 +4,17 @@ import java.net.URI;
 import java.time.Duration;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.AssertTrue;
+import jakarta.validation.constraints.DecimalMax;
+import jakarta.validation.constraints.DecimalMin;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Positive;
 import jakarta.validation.constraints.PositiveOrZero;
 
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.validation.annotation.Validated;
+
+import com.supplierhub.catalog.domain.Supplier;
 
 @Validated
 @ConfigurationProperties(prefix = "supplier")
@@ -21,6 +26,7 @@ public record SupplierIntegrationProperties(
 ) {
 
 	public record Endpoint(
+		boolean enabled,
 		@NotNull URI baseUrl,
 		@NotBlank String apiKey
 	) {
@@ -34,7 +40,9 @@ public record SupplierIntegrationProperties(
 		@PositiveOrZero int maxRetries,
 		@NotNull Duration retryBackoff,
 		@NotNull Duration initialDelay,
-		@NotNull Duration fixedDelay
+		@NotNull Duration fixedDelay,
+		@Positive int bulkMissingMinimumCount,
+		@DecimalMin("0.0") @DecimalMax("1.0") double maximumMissingRatio
 	) {
 
 		@AssertTrue(message = "catalog durations must be valid")
@@ -48,17 +56,27 @@ public record SupplierIntegrationProperties(
 		}
 	}
 
+	public boolean isEnabled(Supplier supplier) {
+		return switch (supplier) {
+			case SUPPLIER_A -> a.enabled();
+			case SUPPLIER_B -> b.enabled();
+		};
+	}
+
 	public record Search(
 		@NotNull Duration connectTimeout,
 		@NotNull Duration responseTimeout,
-		@NotNull Duration callTimeout
+		@NotNull Duration callTimeout,
+		@NotNull Duration overallTimeout,
+		@Positive int maxConcurrency
 	) {
 
 		@AssertTrue(message = "search timeouts must be positive")
 		public boolean isTimeoutConfigurationValid() {
 			return isPositive(connectTimeout)
 				&& isPositive(responseTimeout)
-				&& isPositive(callTimeout);
+				&& isPositive(callTimeout)
+				&& isPositive(overallTimeout);
 		}
 	}
 

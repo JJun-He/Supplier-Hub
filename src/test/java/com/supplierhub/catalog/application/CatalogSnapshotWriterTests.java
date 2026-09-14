@@ -4,10 +4,12 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.util.List;
+import java.util.stream.IntStream;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.data.jpa.test.autoconfigure.DataJpaTest;
+import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
 import org.springframework.context.annotation.Import;
 import org.testcontainers.junit.jupiter.Container;
@@ -21,9 +23,11 @@ import com.supplierhub.catalog.domain.RoomType;
 import com.supplierhub.catalog.domain.Supplier;
 import com.supplierhub.catalog.infrastructure.PropertyRepository;
 import com.supplierhub.catalog.infrastructure.RoomTypeRepository;
+import com.supplierhub.supplier.common.SupplierIntegrationProperties;
 
 @DataJpaTest
 @Import(CatalogSnapshotWriter.class)
+@EnableConfigurationProperties(SupplierIntegrationProperties.class)
 class CatalogSnapshotWriterTests {
 
 	@Container
@@ -115,7 +119,7 @@ class CatalogSnapshotWriterTests {
 		assertThat(suspectedMissingProperty.getConsecutiveMissingCount())
 			.isEqualTo(1);
 		assertThat(roomType(suspectedMissingProperty).isActive()).isTrue();
-		assertThat(roomTypeRepository.findAllActiveForSearch()).hasSize(2);
+		assertThat(roomTypeRepository.findAllActiveMappingsForSearch()).hasSize(2);
 		assertThat(suspectedUpdate.suspectedMissingProperties()).isEqualTo(1);
 		assertThat(suspectedUpdate.deactivatedProperties()).isZero();
 
@@ -132,7 +136,7 @@ class CatalogSnapshotWriterTests {
 		assertThat(deactivatedProperty.getConsecutiveMissingCount())
 			.isEqualTo(2);
 		assertThat(roomType(deactivatedProperty).isActive()).isFalse();
-		assertThat(roomTypeRepository.findAllActiveForSearch()).hasSize(1);
+		assertThat(roomTypeRepository.findAllActiveMappingsForSearch()).hasSize(1);
 		assertThat(deactivatedUpdate.deactivatedProperties()).isEqualTo(1);
 		assertThat(deactivatedUpdate.deactivatedRoomTypes()).isEqualTo(1);
 
@@ -181,7 +185,7 @@ class CatalogSnapshotWriterTests {
 		assertThat(suspectedMissingRoomType.isActive()).isTrue();
 		assertThat(suspectedMissingRoomType.getConsecutiveMissingCount())
 			.isEqualTo(1);
-		assertThat(roomTypeRepository.findAllActiveForSearch()).hasSize(2);
+		assertThat(roomTypeRepository.findAllActiveMappingsForSearch()).hasSize(2);
 		assertThat(suspectedUpdate.suspectedMissingRoomTypes()).isEqualTo(1);
 		assertThat(suspectedUpdate.deactivatedRoomTypes()).isZero();
 
@@ -192,7 +196,7 @@ class CatalogSnapshotWriterTests {
 		RoomType deactivatedRoomType = roomType(property, "ROOM-2");
 		assertThat(deactivatedRoomType.isActive()).isFalse();
 		assertThat(deactivatedRoomType.getConsecutiveMissingCount()).isEqualTo(2);
-		assertThat(roomTypeRepository.findAllActiveForSearch()).hasSize(1);
+		assertThat(roomTypeRepository.findAllActiveMappingsForSearch()).hasSize(1);
 		assertThat(deactivatedUpdate.deactivatedRoomTypes()).isEqualTo(1);
 
 		snapshotStore.replace(snapshot(Supplier.SUPPLIER_A, originalProperty));
@@ -333,6 +337,62 @@ class CatalogSnapshotWriterTests {
 		).isActive()).isFalse();
 		assertThat(property(Supplier.SUPPLIER_A).isActive()).isTrue();
 		assertThat(property(Supplier.SUPPLIER_B).isActive()).isTrue();
+	}
+
+	@Test
+	void rejectsSnapshotThatSuddenlyDropsMostProperties() {
+		List<CatalogProperty> originalProperties = IntStream.rangeClosed(1, 20)
+			.mapToObj(index -> catalogProperty(
+				"PROPERTY-" + index,
+				"Property " + index,
+				"ROOM-1",
+				"Room",
+				2
+			))
+			.toList();
+		snapshotStore.replace(new CatalogSnapshot(
+			Supplier.SUPPLIER_A,
+			originalProperties
+		));
+
+		assertThatThrownBy(() -> snapshotStore.replace(new CatalogSnapshot(
+			Supplier.SUPPLIER_A,
+			List.of(originalProperties.getFirst())
+		)))
+			.isInstanceOf(CatalogSnapshotRejectedException.class)
+			.hasMessageContaining("Bulk missing properties");
+		assertThat(roomTypeRepository.findAllActiveMappingsForSearch()).hasSize(20);
+	}
+
+	@Test
+	void rejectsSnapshotThatSuddenlyDropsMostRoomTypes() {
+		List<CatalogRoomType> originalRoomTypes = IntStream.rangeClosed(1, 20)
+			.mapToObj(index -> new CatalogRoomType(
+				"ROOM-" + index,
+				"Room " + index,
+				2
+			))
+			.toList();
+		snapshotStore.replace(snapshot(
+			Supplier.SUPPLIER_A,
+			new CatalogProperty(
+				"PROPERTY-1",
+				"Property",
+				originalRoomTypes
+			)
+		));
+
+		assertThatThrownBy(() -> snapshotStore.replace(snapshot(
+			Supplier.SUPPLIER_A,
+			new CatalogProperty(
+				"PROPERTY-1",
+				"Property",
+				List.of(originalRoomTypes.getFirst())
+			)
+		)))
+			.isInstanceOf(CatalogSnapshotRejectedException.class)
+			.hasMessageContaining("Bulk missing room types");
+		assertThat(roomTypeRepository.findAllActiveMappingsForSearch()).hasSize(20);
 	}
 
 	private CatalogSnapshot snapshot(
