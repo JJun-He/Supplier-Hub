@@ -112,6 +112,7 @@ class CatalogSynchronizationServiceTests {
 				Duration.ofSeconds(1),
 				2,
 				Duration.ofMillis(1),
+				Duration.ZERO,
 				Duration.ofMinutes(10)
 			),
 			new SupplierIntegrationProperties.Search(

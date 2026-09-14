@@ -8,6 +8,7 @@ public enum SupplierFailureType {
 	UNAVAILABLE,
 	TIMEOUT,
 	INVALID_RESPONSE,
+	CATALOG_UNAVAILABLE,
 	UNKNOWN
 
 }

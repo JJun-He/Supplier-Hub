@@ -174,6 +174,7 @@ class SupplierCatalogClientTests {
 				Duration.ofSeconds(1),
 				2,
 				Duration.ofMillis(10),
+				Duration.ZERO,
 				Duration.ofMinutes(10)
 			),
 			new SupplierIntegrationProperties.Search(

@@ -3,6 +3,9 @@ spring:
     name: mock-supplier
   main:
     web-application-type: servlet
+  threads:
+    virtual:
+      enabled: true
 
 server:
   port: ${MOCK_SUPPLIER_PORT:18080}

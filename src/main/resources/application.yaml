@@ -2,6 +2,9 @@ spring:
   application:
     name: supplier-hub
 
+  main:
+    web-application-type: servlet
+
   config:
     import: optional:file:./.env[.properties]
 
@@ -20,10 +23,6 @@ spring:
 
   flyway:
     enabled: true
-
-  web:
-    resources:
-      add-mappings: true
 
 server:
   shutdown: graceful
