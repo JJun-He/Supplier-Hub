@@ -41,23 +41,27 @@ class CatalogSnapshotWriterTests {
 
 	@Test
 	void refreshesCatalogWhileKeepingInternalIds() {
-		snapshotStore.replace(snapshot(
+		CatalogSnapshotUpdate createdUpdate = snapshotStore.replace(snapshot(
 			Supplier.SUPPLIER_A,
 			"Initial Property",
 			"Initial Room",
 			2
 		));
+		assertThat(createdUpdate.createdProperties()).isEqualTo(1);
+		assertThat(createdUpdate.createdRoomTypes()).isEqualTo(1);
 		Property originalProperty = property(Supplier.SUPPLIER_A);
 		RoomType originalRoomType = roomType(originalProperty);
 		Long propertyId = originalProperty.getId();
 		Long roomTypeId = originalRoomType.getId();
 
-		snapshotStore.replace(snapshot(
+		CatalogSnapshotUpdate refreshedUpdate = snapshotStore.replace(snapshot(
 			Supplier.SUPPLIER_A,
 			"Renamed Property",
 			"Renamed Room",
 			4
 		));
+		assertThat(refreshedUpdate.createdProperties()).isZero();
+		assertThat(refreshedUpdate.createdRoomTypes()).isZero();
 
 		Property refreshedProperty = property(Supplier.SUPPLIER_A);
 		RoomType refreshedRoomType = roomType(refreshedProperty);
@@ -69,7 +73,7 @@ class CatalogSnapshotWriterTests {
 	}
 
 	@Test
-	void deactivatesMissingMappingsAndReactivatesThemWithSameIds() {
+	void deactivatesPropertyAfterTwoConsecutiveOmissionsAndReactivatesWithSameIds() {
 		CatalogProperty retainedProperty = catalogProperty(
 			"PROPERTY-1",
 			"Retained Property",
@@ -98,17 +102,39 @@ class CatalogSnapshotWriterTests {
 		Long propertyId = originalProperty.getId();
 		Long roomTypeId = originalRoomType.getId();
 
-		snapshotStore.replace(snapshot(
+		CatalogSnapshotUpdate suspectedUpdate = snapshotStore.replace(snapshot(
 			Supplier.SUPPLIER_A,
 			retainedProperty
 		));
 
-		assertThat(property(
+		Property suspectedMissingProperty = property(
 			Supplier.SUPPLIER_A,
 			"PROPERTY-2"
-		).isActive()).isFalse();
-		assertThat(roomType(originalProperty).isActive()).isFalse();
+		);
+		assertThat(suspectedMissingProperty.isActive()).isTrue();
+		assertThat(suspectedMissingProperty.getConsecutiveMissingCount())
+			.isEqualTo(1);
+		assertThat(roomType(suspectedMissingProperty).isActive()).isTrue();
+		assertThat(roomTypeRepository.findAllActiveForSearch()).hasSize(2);
+		assertThat(suspectedUpdate.suspectedMissingProperties()).isEqualTo(1);
+		assertThat(suspectedUpdate.deactivatedProperties()).isZero();
+
+		CatalogSnapshotUpdate deactivatedUpdate = snapshotStore.replace(snapshot(
+			Supplier.SUPPLIER_A,
+			retainedProperty
+		));
+
+		Property deactivatedProperty = property(
+			Supplier.SUPPLIER_A,
+			"PROPERTY-2"
+		);
+		assertThat(deactivatedProperty.isActive()).isFalse();
+		assertThat(deactivatedProperty.getConsecutiveMissingCount())
+			.isEqualTo(2);
+		assertThat(roomType(deactivatedProperty).isActive()).isFalse();
 		assertThat(roomTypeRepository.findAllActiveForSearch()).hasSize(1);
+		assertThat(deactivatedUpdate.deactivatedProperties()).isEqualTo(1);
+		assertThat(deactivatedUpdate.deactivatedRoomTypes()).isEqualTo(1);
 
 		snapshotStore.replace(original);
 
@@ -119,8 +145,110 @@ class CatalogSnapshotWriterTests {
 		RoomType reactivatedRoomType = roomType(reactivatedProperty);
 		assertThat(reactivatedProperty.getId()).isEqualTo(propertyId);
 		assertThat(reactivatedProperty.isActive()).isTrue();
+		assertThat(reactivatedProperty.getConsecutiveMissingCount()).isZero();
 		assertThat(reactivatedRoomType.getId()).isEqualTo(roomTypeId);
 		assertThat(reactivatedRoomType.isActive()).isTrue();
+		assertThat(reactivatedRoomType.getConsecutiveMissingCount()).isZero();
+	}
+
+	@Test
+	void deactivatesRoomTypeAfterTwoConsecutiveOmissionsAndResetsOnReappearance() {
+		CatalogProperty originalProperty = new CatalogProperty(
+			"PROPERTY-1",
+			"Property",
+			List.of(
+				new CatalogRoomType("ROOM-1", "Retained Room", 2),
+				new CatalogRoomType("ROOM-2", "Missing Room", 3)
+			)
+		);
+		snapshotStore.replace(snapshot(Supplier.SUPPLIER_A, originalProperty));
+		Property property = property(Supplier.SUPPLIER_A);
+		RoomType originalRoomType = roomType(property, "ROOM-2");
+		Long roomTypeId = originalRoomType.getId();
+		CatalogProperty partialProperty = catalogProperty(
+			"PROPERTY-1",
+			"Property",
+			"ROOM-1",
+			"Retained Room",
+			2
+		);
+
+		CatalogSnapshotUpdate suspectedUpdate = snapshotStore.replace(
+			snapshot(Supplier.SUPPLIER_A, partialProperty)
+		);
+
+		RoomType suspectedMissingRoomType = roomType(property, "ROOM-2");
+		assertThat(suspectedMissingRoomType.isActive()).isTrue();
+		assertThat(suspectedMissingRoomType.getConsecutiveMissingCount())
+			.isEqualTo(1);
+		assertThat(roomTypeRepository.findAllActiveForSearch()).hasSize(2);
+		assertThat(suspectedUpdate.suspectedMissingRoomTypes()).isEqualTo(1);
+		assertThat(suspectedUpdate.deactivatedRoomTypes()).isZero();
+
+		CatalogSnapshotUpdate deactivatedUpdate = snapshotStore.replace(
+			snapshot(Supplier.SUPPLIER_A, partialProperty)
+		);
+
+		RoomType deactivatedRoomType = roomType(property, "ROOM-2");
+		assertThat(deactivatedRoomType.isActive()).isFalse();
+		assertThat(deactivatedRoomType.getConsecutiveMissingCount()).isEqualTo(2);
+		assertThat(roomTypeRepository.findAllActiveForSearch()).hasSize(1);
+		assertThat(deactivatedUpdate.deactivatedRoomTypes()).isEqualTo(1);
+
+		snapshotStore.replace(snapshot(Supplier.SUPPLIER_A, originalProperty));
+
+		RoomType reactivatedRoomType = roomType(property, "ROOM-2");
+		assertThat(reactivatedRoomType.getId()).isEqualTo(roomTypeId);
+		assertThat(reactivatedRoomType.isActive()).isTrue();
+		assertThat(reactivatedRoomType.getConsecutiveMissingCount()).isZero();
+	}
+
+	@Test
+	void resetsSuspectedPropertyOmissionWhenPropertyReappears() {
+		CatalogProperty retainedProperty = catalogProperty(
+			"PROPERTY-1",
+			"Retained Property",
+			"ROOM-1",
+			"Retained Room",
+			2
+		);
+		CatalogProperty intermittentProperty = catalogProperty(
+			"PROPERTY-2",
+			"Intermittent Property",
+			"ROOM-1",
+			"Intermittent Room",
+			2
+		);
+		CatalogSnapshot original = snapshot(
+			Supplier.SUPPLIER_A,
+			retainedProperty,
+			intermittentProperty
+		);
+		snapshotStore.replace(original);
+
+		snapshotStore.replace(snapshot(Supplier.SUPPLIER_A, retainedProperty));
+		assertThat(property(
+			Supplier.SUPPLIER_A,
+			"PROPERTY-2"
+		).getConsecutiveMissingCount()).isEqualTo(1);
+
+		snapshotStore.replace(original);
+
+		Property reappearedProperty = property(
+			Supplier.SUPPLIER_A,
+			"PROPERTY-2"
+		);
+		assertThat(reappearedProperty.isActive()).isTrue();
+		assertThat(reappearedProperty.getConsecutiveMissingCount()).isZero();
+
+		snapshotStore.replace(snapshot(Supplier.SUPPLIER_A, retainedProperty));
+
+		Property missingAgainProperty = property(
+			Supplier.SUPPLIER_A,
+			"PROPERTY-2"
+		);
+		assertThat(missingAgainProperty.isActive()).isTrue();
+		assertThat(missingAgainProperty.getConsecutiveMissingCount()).isEqualTo(1);
 	}
 
 	@Test
@@ -194,6 +322,10 @@ class CatalogSnapshotWriterTests {
 			Supplier.SUPPLIER_A,
 			retainedSupplierAProperty
 		));
+		snapshotStore.replace(snapshot(
+			Supplier.SUPPLIER_A,
+			retainedSupplierAProperty
+		));
 
 		assertThat(property(
 			Supplier.SUPPLIER_A,
@@ -258,9 +390,13 @@ class CatalogSnapshotWriterTests {
 	}
 
 	private RoomType roomType(Property property) {
+		return roomType(property, "ROOM-1");
+	}
+
+	private RoomType roomType(Property property, String roomTypeCode) {
 		return roomTypeRepository.findByPropertyIdAndSupplierRoomTypeCode(
 			property.getId(),
-			"ROOM-1"
+			roomTypeCode
 		).orElseThrow();
 	}
 

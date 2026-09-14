@@ -51,6 +51,9 @@ public class RoomType {
 	@Column(nullable = false)
 	private boolean active;
 
+	@Column(name = "consecutive_missing_count", nullable = false)
+	private int consecutiveMissingCount;
+
 	@Column(name = "created_at", nullable = false, updatable = false)
 	private Instant createdAt;
 
@@ -74,6 +77,7 @@ public class RoomType {
 		this.name = requireText(name, "name");
 		this.maxOccupancy = requirePositive(maxOccupancy);
 		this.active = true;
+		this.consecutiveMissingCount = 0;
 	}
 
 	public static RoomType create(
@@ -94,10 +98,29 @@ public class RoomType {
 		this.name = requireText(name, "name");
 		this.maxOccupancy = requirePositive(maxOccupancy);
 		this.active = true;
+		this.consecutiveMissingCount = 0;
 	}
 
 	public void deactivate() {
 		this.active = false;
+	}
+
+	public void recordMissing(int deactivationThreshold) {
+		if (deactivationThreshold <= 0) {
+			throw new IllegalArgumentException(
+				"deactivationThreshold must be positive"
+			);
+		}
+		if (!active) {
+			return;
+		}
+		consecutiveMissingCount = Math.min(
+			consecutiveMissingCount + 1,
+			deactivationThreshold
+		);
+		if (consecutiveMissingCount >= deactivationThreshold) {
+			active = false;
+		}
 	}
 
 	@PrePersist
@@ -134,6 +157,10 @@ public class RoomType {
 
 	public boolean isActive() {
 		return active;
+	}
+
+	public int getConsecutiveMissingCount() {
+		return consecutiveMissingCount;
 	}
 
 	public Instant getCreatedAt() {

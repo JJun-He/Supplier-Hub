@@ -21,6 +21,8 @@ import com.supplierhub.catalog.infrastructure.RoomTypeRepository;
 @Service
 public class CatalogSnapshotWriter implements CatalogSnapshotStore {
 
+	private static final int DEACTIVATION_MISSING_COUNT = 2;
+
 	private final PropertyRepository propertyRepository;
 	private final RoomTypeRepository roomTypeRepository;
 
@@ -34,7 +36,8 @@ public class CatalogSnapshotWriter implements CatalogSnapshotStore {
 
 	@Override
 	@Transactional
-	public void replace(CatalogSnapshot snapshot) {
+	public CatalogSnapshotUpdate replace(CatalogSnapshot snapshot) {
+		CatalogChangeSummary changes = new CatalogChangeSummary();
 		List<Property> existingPropertyList =
 			propertyRepository.findAllBySupplierOrderByIdAsc(snapshot.supplier());
 		Map<String, Property> existingProperties = indexProperties(
@@ -63,7 +66,11 @@ public class CatalogSnapshotWriter implements CatalogSnapshotStore {
 					catalogProperty.supplierPropertyCode(),
 					catalogProperty.name()
 				));
+				changes.createdProperties++;
 			} else {
+				if (!property.isActive()) {
+					changes.reactivatedProperties++;
+				}
 				property.refresh(catalogProperty.name());
 			}
 
@@ -71,24 +78,39 @@ public class CatalogSnapshotWriter implements CatalogSnapshotStore {
 			replaceRoomTypes(
 				property,
 				catalogProperty.roomTypes(),
-				existingRoomTypes.getOrDefault(property.getId(), List.of())
+				existingRoomTypes.getOrDefault(property.getId(), List.of()),
+				changes
 			);
 		}
 
 		for (Property property : existingProperties.values()) {
 			if (!seenPropertyIds.contains(property.getId())) {
-				property.deactivate();
-				existingRoomTypes
-					.getOrDefault(property.getId(), List.of())
-					.forEach(RoomType::deactivate);
+				boolean wasActive = property.isActive();
+				property.recordMissing(DEACTIVATION_MISSING_COUNT);
+				if (wasActive && property.isActive()) {
+					changes.suspectedMissingProperties++;
+				} else if (wasActive) {
+					changes.deactivatedProperties++;
+					existingRoomTypes
+						.getOrDefault(property.getId(), List.of())
+						.forEach(roomType -> {
+							if (roomType.isActive()) {
+								roomType.deactivate();
+								changes.deactivatedRoomTypes++;
+							}
+						});
+				}
 			}
 		}
+
+		return changes.toUpdate(snapshot);
 	}
 
 	private void replaceRoomTypes(
 		Property property,
 		List<CatalogRoomType> catalogRoomTypes,
-		List<RoomType> existingRoomTypeList
+		List<RoomType> existingRoomTypeList,
+		CatalogChangeSummary changes
 	) {
 		Map<String, RoomType> existingRoomTypes = indexRoomTypes(
 			existingRoomTypeList
@@ -106,7 +128,11 @@ public class CatalogSnapshotWriter implements CatalogSnapshotStore {
 					catalogRoomType.name(),
 					catalogRoomType.maxOccupancy()
 				));
+				changes.createdRoomTypes++;
 			} else {
+				if (!roomType.isActive()) {
+					changes.reactivatedRoomTypes++;
+				}
 				roomType.refresh(
 					catalogRoomType.name(),
 					catalogRoomType.maxOccupancy()
@@ -117,7 +143,13 @@ public class CatalogSnapshotWriter implements CatalogSnapshotStore {
 
 		for (RoomType roomType : existingRoomTypes.values()) {
 			if (!seenRoomTypeIds.contains(roomType.getId())) {
-				roomType.deactivate();
+				boolean wasActive = roomType.isActive();
+				roomType.recordMissing(DEACTIVATION_MISSING_COUNT);
+				if (wasActive && roomType.isActive()) {
+					changes.suspectedMissingRoomTypes++;
+				} else if (wasActive) {
+					changes.deactivatedRoomTypes++;
+				}
 			}
 		}
 	}
@@ -180,6 +212,36 @@ public class CatalogSnapshotWriter implements CatalogSnapshotStore {
 			).add(roomType);
 		}
 		return grouped;
+	}
+
+	private static final class CatalogChangeSummary {
+
+		private int createdProperties;
+		private int createdRoomTypes;
+		private int reactivatedProperties;
+		private int reactivatedRoomTypes;
+		private int suspectedMissingProperties;
+		private int suspectedMissingRoomTypes;
+		private int deactivatedProperties;
+		private int deactivatedRoomTypes;
+
+		private CatalogSnapshotUpdate toUpdate(CatalogSnapshot snapshot) {
+			return new CatalogSnapshotUpdate(
+				snapshot.properties().size(),
+				snapshot.properties().stream()
+					.mapToInt(property -> property.roomTypes().size())
+					.sum(),
+				createdProperties,
+				createdRoomTypes,
+				reactivatedProperties,
+				reactivatedRoomTypes,
+				suspectedMissingProperties,
+				suspectedMissingRoomTypes,
+				deactivatedProperties,
+				deactivatedRoomTypes
+			);
+		}
+
 	}
 
 }

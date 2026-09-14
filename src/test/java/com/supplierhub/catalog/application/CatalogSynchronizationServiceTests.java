@@ -196,8 +196,20 @@ class CatalogSynchronizationServiceTests {
 		private final List<CatalogSnapshot> snapshots = new ArrayList<>();
 
 		@Override
-		public void replace(CatalogSnapshot snapshot) {
+		public CatalogSnapshotUpdate replace(CatalogSnapshot snapshot) {
 			snapshots.add(snapshot);
+			return new CatalogSnapshotUpdate(
+				snapshot.properties().size(),
+				0,
+				0,
+				0,
+				0,
+				0,
+				0,
+				0,
+				0,
+				0
+			);
 		}
 
 	}

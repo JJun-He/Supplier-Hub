@@ -4,6 +4,6 @@ import com.supplierhub.catalog.domain.CatalogSnapshot;
 
 public interface CatalogSnapshotStore {
 
-	void replace(CatalogSnapshot snapshot);
+	CatalogSnapshotUpdate replace(CatalogSnapshot snapshot);
 
 }

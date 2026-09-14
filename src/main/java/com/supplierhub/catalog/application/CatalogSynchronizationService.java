@@ -77,11 +77,20 @@ public class CatalogSynchronizationService {
 					"Supplier catalog completed without a snapshot"
 				);
 			}
-			snapshotStore.replace(snapshot);
+			CatalogSnapshotUpdate update = snapshotStore.replace(snapshot);
 			log.info(
-				"Supplier catalog synchronization succeeded: supplier={}, properties={}",
+				"Supplier catalog synchronization succeeded: supplier={}, properties={}, roomTypes={}, createdProperties={}, createdRoomTypes={}, reactivatedProperties={}, reactivatedRoomTypes={}, suspectedMissingProperties={}, suspectedMissingRoomTypes={}, deactivatedProperties={}, deactivatedRoomTypes={}",
 				client.supplier(),
-				snapshot.properties().size()
+				update.propertyCount(),
+				update.roomTypeCount(),
+				update.createdProperties(),
+				update.createdRoomTypes(),
+				update.reactivatedProperties(),
+				update.reactivatedRoomTypes(),
+				update.suspectedMissingProperties(),
+				update.suspectedMissingRoomTypes(),
+				update.deactivatedProperties(),
+				update.deactivatedRoomTypes()
 			);
 		} catch (SupplierIntegrationException exception) {
 			log.warn(
