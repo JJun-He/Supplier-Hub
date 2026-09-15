@@ -77,9 +77,8 @@ public class IntegratedSearchService {
 	public IntegratedSearchResult search(SearchCriteria criteria) {
 		Objects.requireNonNull(criteria, "criteria must not be null");
 		long startedAt = System.nanoTime();
-		Map<Supplier, List<PropertyMapping>> mappings = groupMappings(
-			mappingReader.findAllActive()
-		);
+		List<ActiveCatalogMapping> rows = mappingReader.findAllActive();
+		Map<Supplier, List<PropertyMapping>> mappings = groupMappings(rows);
 		List<SupplierSearchPlan> plans = clients.stream()
 			.map(client -> plan(client, criteria, mappings.getOrDefault(
 				client.supplier(),
@@ -106,7 +105,8 @@ public class IntegratedSearchService {
 
 		IntegratedSearchResult result = new IntegratedSearchResult(
 			overallStatus(supplierResults),
-			supplierResults
+			supplierResults,
+			catalogItems(rows)
 		);
 		log.info(
 			"Integrated Supplier search completed: status={}, acceptedOffers={}, elapsedMillis={}",
@@ -115,6 +115,22 @@ public class IntegratedSearchService {
 			Duration.ofNanos(System.nanoTime() - startedAt).toMillis()
 		);
 		return result;
+	}
+
+	private List<SearchCatalogItem> catalogItems(
+		List<ActiveCatalogMapping> mappings
+	) {
+		return mappings.stream()
+			.map(mapping -> new SearchCatalogItem(
+				mapping.propertyId(),
+				mapping.propertyName(),
+				mapping.roomTypeId(),
+				mapping.roomTypeName()
+			))
+			.sorted(Comparator
+				.comparingLong(SearchCatalogItem::propertyId)
+				.thenComparingLong(SearchCatalogItem::roomTypeId))
+			.toList();
 	}
 
 	private Flux<BatchSearchOutcome> execute(SupplierSearchPlan plan) {

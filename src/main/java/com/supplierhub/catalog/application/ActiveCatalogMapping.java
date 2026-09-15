@@ -6,7 +6,9 @@ public record ActiveCatalogMapping(
 	long propertyId,
 	Supplier supplier,
 	String supplierPropertyCode,
+	String propertyName,
 	long roomTypeId,
-	String supplierRoomTypeCode
+	String supplierRoomTypeCode,
+	String roomTypeName
 ) {
 }

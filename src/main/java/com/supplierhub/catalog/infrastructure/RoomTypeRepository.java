@@ -34,8 +34,10 @@ public interface RoomTypeRepository extends JpaRepository<RoomType, Long> {
 			property.id,
 			property.supplier,
 			property.supplierPropertyCode,
+			property.name,
 			roomType.id,
-			roomType.supplierRoomTypeCode
+			roomType.supplierRoomTypeCode,
+			roomType.name
 		)
 		from RoomType roomType
 		join roomType.property property

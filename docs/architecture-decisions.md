@@ -305,6 +305,7 @@ GET /api/v1/stays/search?checkIn=2026-09-01&checkOut=2026-09-04&adults=2&childre
       "status": "SUCCESS",
       "acceptedOfferCount": 1,
       "rejectedOfferCount": 0,
+      "unavailableOfferCount": 0,
       "failureTypes": []
     }
   ]
@@ -427,7 +428,7 @@ API 키와 기본 URL은 외부 설정으로 관리한다. 실제 키를 저장�
 
 활성 숙소 코드는 Supplier별로 묶은 뒤 최대 50개씩 나눈다. 서로 다른 Supplier는 동시에 실행하고, 한 Supplier 안에서는 최대 4개 묶음만 동시에 실행한다.
 
-검색용 카탈로그 조회는 Entity 전체가 아니라 내부 숙소·객실 타입 ID와 Supplier 코드만 담은 읽기 전용 projection을 사용한다. application의 조회 포트와 JPA 어댑터를 분리하고 짧은 `readOnly` 트랜잭션 안에서 projection을 완성한 뒤 트랜잭션을 종료한다. 외부 HTTP 호출 중에는 DB 트랜잭션을 유지하지 않는다. 활성 객실 타입이 하나도 없는 enabled Supplier는 외부 검색을 호출하지 않고 `CATALOG_UNAVAILABLE` 실패로 기록한다.
+검색용 카탈로그 조회는 Entity 전체가 아니라 내부 숙소·객실 타입 ID와 이름, Supplier 코드만 담은 읽기 전용 projection을 사용한다. 이름은 고객 응답 조립에 사용하고 Supplier 코드는 외부 요청 조립에만 사용하며 직렬화하지 않는다. application의 조회 포트와 JPA 어댑터를 분리하고 짧은 `readOnly` 트랜잭션 안에서 projection을 완성한 뒤 트랜잭션을 종료한다. 외부 HTTP 호출 중에는 DB 트랜잭션을 유지하지 않는다. 활성 객실 타입이 하나도 없는 enabled Supplier는 외부 검색을 호출하지 않고 `CATALOG_UNAVAILABLE` 실패로 기록한다.
 
 모든 묶음을 무제한 병렬 호출하면 한 번의 고객 요청이 Supplier 호출 폭증과 호출 한도 초과를 일으킬 수 있다. 모두 순차 호출하면 숙소 수에 비례해 검색 시간이 길어진다. 제한 병렬성은 두 위험 사이의 명시적인 절충이며 Supplier별 설정으로 분리한다.
 

@@ -1,0 +1,219 @@
+package com.supplierhub.search.api;
+
+import java.time.LocalDate;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+
+import com.supplierhub.catalog.domain.Supplier;
+import com.supplierhub.search.application.IntegratedSearchResult;
+import com.supplierhub.search.application.SearchCatalogItem;
+import com.supplierhub.search.application.SearchStatus;
+import com.supplierhub.search.application.SupplierSearchOutcome;
+import com.supplierhub.search.application.SupplierSearchStatus;
+import com.supplierhub.search.domain.Offer;
+import com.supplierhub.search.domain.SearchCriteria;
+import com.supplierhub.supplier.common.SupplierFailureType;
+
+public record StaySearchResponse(
+	SearchStatus status,
+	SearchCriteriaResponse searchCriteria,
+	List<StayResponse> stays,
+	List<SupplierResultResponse> supplierResults
+) {
+
+	public StaySearchResponse {
+		stays = List.copyOf(stays);
+		supplierResults = List.copyOf(supplierResults);
+	}
+
+	public static StaySearchResponse from(
+		SearchCriteria criteria,
+		IntegratedSearchResult result
+	) {
+		Map<Long, SearchCatalogItem> catalogByRoomType = new LinkedHashMap<>();
+		for (SearchCatalogItem item : result.catalogItems()) {
+			catalogByRoomType.put(item.roomTypeId(), item);
+		}
+
+		Map<Long, StayBuilder> stays = new LinkedHashMap<>();
+		for (Offer offer : result.offers()) {
+			SearchCatalogItem catalogItem = catalogByRoomType.get(
+				offer.roomTypeId()
+			);
+			if (catalogItem == null
+				|| catalogItem.propertyId() != offer.propertyId()) {
+				throw new IllegalStateException(
+					"Search offer must have matching catalog metadata"
+				);
+			}
+			StayBuilder stay = stays.computeIfAbsent(
+				offer.propertyId(),
+				ignored -> new StayBuilder(
+					catalogItem.propertyId(),
+					catalogItem.propertyName()
+				)
+			);
+			stay.add(catalogItem, offer);
+		}
+
+		return new StaySearchResponse(
+			result.status(),
+			SearchCriteriaResponse.from(criteria),
+			stays.values().stream().map(StayBuilder::build).toList(),
+			result.supplierResults().stream()
+				.map(SupplierResultResponse::from)
+				.toList()
+		);
+	}
+
+	public record SearchCriteriaResponse(
+		LocalDate checkIn,
+		LocalDate checkOut,
+		int adults,
+		int children
+	) {
+
+		private static SearchCriteriaResponse from(SearchCriteria criteria) {
+			return new SearchCriteriaResponse(
+				criteria.checkIn(),
+				criteria.checkOut(),
+				criteria.adults(),
+				criteria.children()
+			);
+		}
+	}
+
+	public record StayResponse(
+		long stayId,
+		String stayName,
+		List<RoomTypeResponse> roomTypes
+	) {
+
+		public StayResponse {
+			roomTypes = List.copyOf(roomTypes);
+		}
+	}
+
+	public record RoomTypeResponse(
+		long roomTypeId,
+		String roomTypeName,
+		int maxOccupancy,
+		List<OfferResponse> offers
+	) {
+
+		public RoomTypeResponse {
+			offers = List.copyOf(offers);
+		}
+	}
+
+	public record OfferResponse(
+		Supplier supplier,
+		int availableRooms,
+		boolean breakfastIncluded,
+		PriceResponse price
+	) {
+
+		private static OfferResponse from(Offer offer) {
+			return new OfferResponse(
+				offer.supplier(),
+				offer.availableRooms(),
+				offer.breakfastIncluded(),
+				new PriceResponse(
+					offer.price().totalAmount().currencyCode(),
+					offer.price().totalAmount().amount()
+				)
+			);
+		}
+	}
+
+	public record PriceResponse(String currency, long totalAmount) {
+	}
+
+	public record SupplierResultResponse(
+		Supplier supplier,
+		SupplierSearchStatus status,
+		int acceptedOfferCount,
+		int rejectedOfferCount,
+		int unavailableOfferCount,
+		List<SupplierFailureType> failureTypes
+	) {
+
+		public SupplierResultResponse {
+			failureTypes = List.copyOf(failureTypes);
+		}
+
+		private static SupplierResultResponse from(
+			SupplierSearchOutcome result
+		) {
+			return new SupplierResultResponse(
+				result.supplier(),
+				result.status(),
+				result.acceptedOfferCount(),
+				result.rejectedOfferCount(),
+				result.unavailableOfferCount(),
+				result.failureTypes()
+			);
+		}
+	}
+
+	private static final class StayBuilder {
+
+		private final long stayId;
+		private final String stayName;
+		private final Map<Long, RoomTypeBuilder> roomTypes = new LinkedHashMap<>();
+
+		private StayBuilder(long stayId, String stayName) {
+			this.stayId = stayId;
+			this.stayName = stayName;
+		}
+
+		private void add(SearchCatalogItem catalogItem, Offer offer) {
+			roomTypes.computeIfAbsent(
+				offer.roomTypeId(),
+				ignored -> new RoomTypeBuilder(
+					catalogItem.roomTypeId(),
+					catalogItem.roomTypeName(),
+					offer.maxOccupancy()
+				)
+			).offers.add(OfferResponse.from(offer));
+		}
+
+		private StayResponse build() {
+			return new StayResponse(
+				stayId,
+				stayName,
+				roomTypes.values().stream().map(RoomTypeBuilder::build).toList()
+			);
+		}
+	}
+
+	private static final class RoomTypeBuilder {
+
+		private final long roomTypeId;
+		private final String roomTypeName;
+		private final int maxOccupancy;
+		private final List<OfferResponse> offers = new ArrayList<>();
+
+		private RoomTypeBuilder(
+			long roomTypeId,
+			String roomTypeName,
+			int maxOccupancy
+		) {
+			this.roomTypeId = roomTypeId;
+			this.roomTypeName = roomTypeName;
+			this.maxOccupancy = maxOccupancy;
+		}
+
+		private RoomTypeResponse build() {
+			return new RoomTypeResponse(
+				roomTypeId,
+				roomTypeName,
+				maxOccupancy,
+				offers
+			);
+		}
+	}
+
+}

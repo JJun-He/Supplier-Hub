@@ -69,6 +69,10 @@ class IntegratedSearchServiceTests {
 
 		assertThat(batchSizes).containsExactlyInAnyOrder(50, 1);
 		assertThat(result.status()).isEqualTo(SearchStatus.COMPLETE);
+		assertThat(result.catalogItems())
+			.hasSize(51)
+			.first()
+			.isEqualTo(new SearchCatalogItem(1, "Property 1", 10, "Room 1"));
 		assertThat(result.supplierResults()).singleElement().satisfies(outcome -> {
 			assertThat(outcome.status()).isEqualTo(SupplierSearchStatus.SUCCESS);
 			assertThat(outcome.failureTypes()).isEmpty();
@@ -457,8 +461,10 @@ class IntegratedSearchServiceTests {
 					propertyId,
 					supplier,
 					"PROPERTY-" + propertyId,
+					"Property " + propertyId,
 					propertyId * 10,
-					"ROOM-1"
+					"ROOM-1",
+					"Room " + propertyId
 				);
 			})
 			.toList();

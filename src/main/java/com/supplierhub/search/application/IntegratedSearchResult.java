@@ -10,7 +10,8 @@ import com.supplierhub.search.domain.Offer;
 
 public record IntegratedSearchResult(
 	SearchStatus status,
-	List<SupplierSearchOutcome> supplierResults
+	List<SupplierSearchOutcome> supplierResults,
+	List<SearchCatalogItem> catalogItems
 ) {
 
 	public IntegratedSearchResult {
@@ -19,12 +20,25 @@ public record IntegratedSearchResult(
 			supplierResults,
 			"supplierResults must not be null"
 		));
+		catalogItems = List.copyOf(Objects.requireNonNull(
+			catalogItems,
+			"catalogItems must not be null"
+		));
 		Set<Supplier> suppliers = new HashSet<>();
 		for (SupplierSearchOutcome result : supplierResults) {
 			Objects.requireNonNull(result, "supplier result must not be null");
 			if (!suppliers.add(result.supplier())) {
 				throw new IllegalArgumentException(
 					"supplierResults must contain each supplier at most once"
+				);
+			}
+		}
+		Set<Long> roomTypeIds = new HashSet<>();
+		for (SearchCatalogItem item : catalogItems) {
+			Objects.requireNonNull(item, "catalog item must not be null");
+			if (!roomTypeIds.add(item.roomTypeId())) {
+				throw new IllegalArgumentException(
+					"catalogItems must contain each room type at most once"
 				);
 			}
 		}

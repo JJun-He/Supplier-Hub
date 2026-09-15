@@ -194,8 +194,10 @@ class CatalogRepositoryTests {
 				property.getId(),
 				Supplier.SUPPLIER_A,
 				"PROPERTY-1",
+				"Property",
 				activeRoomType.getId(),
-				"ROOM-1"
+				"ROOM-1",
+				"Active Room"
 			));
 	}
 
