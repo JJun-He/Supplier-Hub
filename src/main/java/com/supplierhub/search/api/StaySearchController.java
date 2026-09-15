@@ -34,7 +34,7 @@ public class StaySearchController {
 		@DateTimeFormat(iso = DateTimeFormat.ISO.DATE)
 		LocalDate checkOut,
 		@RequestParam int adults,
-		@RequestParam int children
+		@RequestParam(defaultValue = "0") int children
 	) {
 		SearchCriteria criteria = criteria(checkIn, checkOut, adults, children);
 		IntegratedSearchResult result = searchService.search(criteria);

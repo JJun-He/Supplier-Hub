@@ -7,6 +7,8 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.EnumMap;
 import java.util.EnumSet;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -99,14 +101,17 @@ public class IntegratedSearchService {
 		List<BatchSearchOutcome> safeCompleted = completed == null
 			? List.of()
 			: completed;
-		List<SupplierSearchOutcome> supplierResults = plans.stream()
+		List<SupplierSearchAggregate> aggregates = plans.stream()
 			.map(plan -> aggregate(plan, safeCompleted))
 			.toList();
+		List<SupplierSearchOutcome> supplierResults = enrichOutcomes(
+			aggregates,
+			rows
+		);
 
 		IntegratedSearchResult result = new IntegratedSearchResult(
 			overallStatus(supplierResults),
-			supplierResults,
-			catalogItems(rows)
+			supplierResults
 		);
 		log.info(
 			"Integrated Supplier search completed: status={}, acceptedOffers={}, elapsedMillis={}",
@@ -117,20 +122,54 @@ public class IntegratedSearchService {
 		return result;
 	}
 
-	private List<SearchCatalogItem> catalogItems(
+	private List<SupplierSearchOutcome> enrichOutcomes(
+		List<SupplierSearchAggregate> aggregates,
 		List<ActiveCatalogMapping> mappings
 	) {
-		return mappings.stream()
-			.map(mapping -> new SearchCatalogItem(
-				mapping.propertyId(),
-				mapping.propertyName(),
-				mapping.roomTypeId(),
-				mapping.roomTypeName()
-			))
-			.sorted(Comparator
-				.comparingLong(SearchCatalogItem::propertyId)
-				.thenComparingLong(SearchCatalogItem::roomTypeId))
+		List<Offer> offers = aggregates.stream()
+			.flatMap(result -> result.offers().stream())
 			.toList();
+		if (offers.isEmpty()) {
+			return aggregates.stream()
+				.map(aggregate -> aggregate.toOutcome(List.of()))
+				.toList();
+		}
+
+		Set<Long> offeredRoomTypeIds = new HashSet<>();
+		offers.forEach(offer -> offeredRoomTypeIds.add(offer.roomTypeId()));
+		Map<Long, ActiveCatalogMapping> catalogByRoomType = new HashMap<>();
+		for (ActiveCatalogMapping mapping : mappings) {
+			if (offeredRoomTypeIds.contains(mapping.roomTypeId())) {
+				catalogByRoomType.put(mapping.roomTypeId(), mapping);
+			}
+		}
+
+		return aggregates.stream()
+			.map(aggregate -> aggregate.toOutcome(
+				aggregate.offers().stream()
+					.map(offer -> enrichOffer(offer, catalogByRoomType))
+					.toList()
+			))
+			.toList();
+	}
+
+	private SearchOffer enrichOffer(
+		Offer offer,
+		Map<Long, ActiveCatalogMapping> catalogByRoomType
+	) {
+		ActiveCatalogMapping mapping = catalogByRoomType.get(offer.roomTypeId());
+		if (mapping == null
+			|| mapping.propertyId() != offer.propertyId()
+			|| mapping.supplier() != offer.supplier()) {
+			throw new IllegalStateException(
+				"Accepted offer must have matching active catalog metadata"
+			);
+		}
+		return new SearchOffer(
+			offer,
+			mapping.propertyName(),
+			mapping.roomTypeName()
+		);
 	}
 
 	private Flux<BatchSearchOutcome> execute(SupplierSearchPlan plan) {
@@ -195,12 +234,12 @@ public class IntegratedSearchService {
 		return new SupplierSearchPlan(client, criteria, mappings);
 	}
 
-	private SupplierSearchOutcome aggregate(
+	private SupplierSearchAggregate aggregate(
 		SupplierSearchPlan plan,
 		List<BatchSearchOutcome> allCompleted
 	) {
 		if (plan.batchCount() == 0) {
-			return new SupplierSearchOutcome(
+			return new SupplierSearchAggregate(
 				plan.client().supplier(),
 				SupplierSearchStatus.FAILED,
 				List.of(),
@@ -255,7 +294,7 @@ public class IntegratedSearchService {
 		} else {
 			status = SupplierSearchStatus.PARTIAL;
 		}
-		return new SupplierSearchOutcome(
+		return new SupplierSearchAggregate(
 			plan.client().supplier(),
 			status,
 			offers,
@@ -430,6 +469,30 @@ public class IntegratedSearchService {
 
 		private boolean isSuccess() {
 			return result != null;
+		}
+
+	}
+
+	private record SupplierSearchAggregate(
+		Supplier supplier,
+		SupplierSearchStatus status,
+		List<Offer> offers,
+		int rejectedOfferCount,
+		int unavailableOfferCount,
+		List<SupplierFailureType> failureTypes
+	) {
+
+		private SupplierSearchOutcome toOutcome(
+			List<SearchOffer> searchOffers
+		) {
+			return new SupplierSearchOutcome(
+				supplier,
+				status,
+				searchOffers,
+				rejectedOfferCount,
+				unavailableOfferCount,
+				failureTypes
+			);
 		}
 
 	}

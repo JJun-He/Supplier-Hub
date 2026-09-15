@@ -69,10 +69,7 @@ class IntegratedSearchServiceTests {
 
 		assertThat(batchSizes).containsExactlyInAnyOrder(50, 1);
 		assertThat(result.status()).isEqualTo(SearchStatus.COMPLETE);
-		assertThat(result.catalogItems())
-			.hasSize(51)
-			.first()
-			.isEqualTo(new SearchCatalogItem(1, "Property 1", 10, "Room 1"));
+		assertThat(result.searchOffers()).isEmpty();
 		assertThat(result.supplierResults()).singleElement().satisfies(outcome -> {
 			assertThat(outcome.status()).isEqualTo(SupplierSearchStatus.SUCCESS);
 			assertThat(outcome.failureTypes()).isEmpty();
@@ -166,6 +163,11 @@ class IntegratedSearchServiceTests {
 
 		assertThat(result.status()).isEqualTo(SearchStatus.PARTIAL);
 		assertThat(result.offers()).containsExactly(offer);
+		assertThat(result.searchOffers()).singleElement().satisfies(searchOffer -> {
+			assertThat(searchOffer.offer()).isEqualTo(offer);
+			assertThat(searchOffer.propertyName()).isEqualTo("Property 1");
+			assertThat(searchOffer.roomTypeName()).isEqualTo("Room 1");
+		});
 		assertThat(result.supplierResults()).singleElement().satisfies(outcome -> {
 			assertThat(outcome.status()).isEqualTo(SupplierSearchStatus.PARTIAL);
 			assertThat(outcome.acceptedOfferCount()).isEqualTo(1);

@@ -46,6 +46,28 @@ class SearchCriteriaTests {
 	}
 
 	@Test
+	void allowsThirtyNightsAndRejectsLongerStay() {
+		LocalDate checkIn = LocalDate.of(2026, 9, 1);
+
+		SearchCriteria criteria = new SearchCriteria(
+			checkIn,
+			checkIn.plusDays(SearchCriteria.MAX_NIGHTS),
+			1,
+			0
+		);
+
+		assertThat(criteria.nightCount()).isEqualTo(SearchCriteria.MAX_NIGHTS);
+		assertThatThrownBy(() -> new SearchCriteria(
+			checkIn,
+			checkIn.plusDays(SearchCriteria.MAX_NIGHTS + 1),
+			1,
+			0
+		))
+			.isInstanceOf(IllegalArgumentException.class)
+			.hasMessage("stay must not exceed 30 nights");
+	}
+
+	@Test
 	void requiresNonNegativeGuestCounts() {
 		LocalDate checkIn = LocalDate.of(2026, 9, 1);
 		LocalDate checkOut = checkIn.plusDays(1);

@@ -5,10 +5,11 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 
 import com.supplierhub.catalog.domain.Supplier;
 import com.supplierhub.search.application.IntegratedSearchResult;
-import com.supplierhub.search.application.SearchCatalogItem;
+import com.supplierhub.search.application.SearchOffer;
 import com.supplierhub.search.application.SearchStatus;
 import com.supplierhub.search.application.SupplierSearchOutcome;
 import com.supplierhub.search.application.SupplierSearchStatus;
@@ -24,38 +25,33 @@ public record StaySearchResponse(
 ) {
 
 	public StaySearchResponse {
-		stays = List.copyOf(stays);
-		supplierResults = List.copyOf(supplierResults);
+		Objects.requireNonNull(status, "status must not be null");
+		Objects.requireNonNull(searchCriteria, "searchCriteria must not be null");
+		stays = List.copyOf(Objects.requireNonNull(
+			stays,
+			"stays must not be null"
+		));
+		supplierResults = List.copyOf(Objects.requireNonNull(
+			supplierResults,
+			"supplierResults must not be null"
+		));
 	}
 
 	public static StaySearchResponse from(
 		SearchCriteria criteria,
 		IntegratedSearchResult result
 	) {
-		Map<Long, SearchCatalogItem> catalogByRoomType = new LinkedHashMap<>();
-		for (SearchCatalogItem item : result.catalogItems()) {
-			catalogByRoomType.put(item.roomTypeId(), item);
-		}
-
 		Map<Long, StayBuilder> stays = new LinkedHashMap<>();
-		for (Offer offer : result.offers()) {
-			SearchCatalogItem catalogItem = catalogByRoomType.get(
-				offer.roomTypeId()
-			);
-			if (catalogItem == null
-				|| catalogItem.propertyId() != offer.propertyId()) {
-				throw new IllegalStateException(
-					"Search offer must have matching catalog metadata"
-				);
-			}
+		for (SearchOffer searchOffer : result.searchOffers()) {
+			Offer offer = searchOffer.offer();
 			StayBuilder stay = stays.computeIfAbsent(
 				offer.propertyId(),
 				ignored -> new StayBuilder(
-					catalogItem.propertyId(),
-					catalogItem.propertyName()
+					offer.propertyId(),
+					searchOffer.propertyName()
 				)
 			);
-			stay.add(catalogItem, offer);
+			stay.add(searchOffer);
 		}
 
 		return new StaySearchResponse(
@@ -92,7 +88,11 @@ public record StaySearchResponse(
 	) {
 
 		public StayResponse {
-			roomTypes = List.copyOf(roomTypes);
+			Objects.requireNonNull(stayName, "stayName must not be null");
+			roomTypes = List.copyOf(Objects.requireNonNull(
+				roomTypes,
+				"roomTypes must not be null"
+			));
 		}
 	}
 
@@ -104,7 +104,11 @@ public record StaySearchResponse(
 	) {
 
 		public RoomTypeResponse {
-			offers = List.copyOf(offers);
+			Objects.requireNonNull(roomTypeName, "roomTypeName must not be null");
+			offers = List.copyOf(Objects.requireNonNull(
+				offers,
+				"offers must not be null"
+			));
 		}
 	}
 
@@ -128,7 +132,14 @@ public record StaySearchResponse(
 		}
 	}
 
-	public record PriceResponse(String currency, long totalAmount) {
+	public record PriceResponse(
+		String currency,
+		long totalAmountIncludingTax
+	) {
+
+		public PriceResponse {
+			Objects.requireNonNull(currency, "currency must not be null");
+		}
 	}
 
 	public record SupplierResultResponse(
@@ -141,7 +152,12 @@ public record StaySearchResponse(
 	) {
 
 		public SupplierResultResponse {
-			failureTypes = List.copyOf(failureTypes);
+			Objects.requireNonNull(supplier, "supplier must not be null");
+			Objects.requireNonNull(status, "status must not be null");
+			failureTypes = List.copyOf(Objects.requireNonNull(
+				failureTypes,
+				"failureTypes must not be null"
+			));
 		}
 
 		private static SupplierResultResponse from(
@@ -169,12 +185,13 @@ public record StaySearchResponse(
 			this.stayName = stayName;
 		}
 
-		private void add(SearchCatalogItem catalogItem, Offer offer) {
+		private void add(SearchOffer searchOffer) {
+			Offer offer = searchOffer.offer();
 			roomTypes.computeIfAbsent(
 				offer.roomTypeId(),
 				ignored -> new RoomTypeBuilder(
-					catalogItem.roomTypeId(),
-					catalogItem.roomTypeName(),
+					offer.roomTypeId(),
+					searchOffer.roomTypeName(),
 					offer.maxOccupancy()
 				)
 			).offers.add(OfferResponse.from(offer));

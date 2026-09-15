@@ -11,12 +11,18 @@ public record SearchCriteria(
 	int adults,
 	int children
 ) {
+	public static final long MAX_NIGHTS = 30;
 
 	public SearchCriteria {
 		Objects.requireNonNull(checkIn, "checkIn must not be null");
 		Objects.requireNonNull(checkOut, "checkOut must not be null");
 		if (!checkOut.isAfter(checkIn)) {
 			throw new IllegalArgumentException("checkOut must be after checkIn");
+		}
+		if (ChronoUnit.DAYS.between(checkIn, checkOut) > MAX_NIGHTS) {
+			throw new IllegalArgumentException(
+				"stay must not exceed " + MAX_NIGHTS + " nights"
+			);
 		}
 		if (adults < 0) {
 			throw new IllegalArgumentException("adults must not be negative");

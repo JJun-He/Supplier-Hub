@@ -1,19 +1,17 @@
 package com.supplierhub.search.application;
 
-public record SearchCatalogItem(
-	long propertyId,
+import java.util.Objects;
+
+import com.supplierhub.search.domain.Offer;
+
+public record SearchOffer(
+	Offer offer,
 	String propertyName,
-	long roomTypeId,
 	String roomTypeName
 ) {
 
-	public SearchCatalogItem {
-		if (propertyId <= 0) {
-			throw new IllegalArgumentException("propertyId must be positive");
-		}
-		if (roomTypeId <= 0) {
-			throw new IllegalArgumentException("roomTypeId must be positive");
-		}
+	public SearchOffer {
+		Objects.requireNonNull(offer, "offer must not be null");
 		propertyName = requireText(propertyName, "propertyName");
 		roomTypeName = requireText(roomTypeName, "roomTypeName");
 	}

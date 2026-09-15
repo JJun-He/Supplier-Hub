@@ -22,7 +22,7 @@ import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import com.supplierhub.catalog.domain.Supplier;
 import com.supplierhub.search.application.IntegratedSearchResult;
 import com.supplierhub.search.application.IntegratedSearchService;
-import com.supplierhub.search.application.SearchCatalogItem;
+import com.supplierhub.search.application.SearchOffer;
 import com.supplierhub.search.application.SearchStatus;
 import com.supplierhub.search.application.SupplierSearchOutcome;
 import com.supplierhub.search.application.SupplierSearchStatus;
@@ -80,15 +80,14 @@ class StaySearchControllerTests {
 			List.of(outcome(
 				Supplier.SUPPLIER_A,
 				SupplierSearchStatus.SUCCESS,
-				List.of(deluxe, suite),
+				List.of(
+					new SearchOffer(deluxe, "Riverside Hotel", "Deluxe"),
+					new SearchOffer(suite, "Riverside Hotel", "Suite")
+				),
 				0,
 				0,
 				List.of()
-			)),
-			List.of(
-				new SearchCatalogItem(1, "Riverside Hotel", 10, "Deluxe"),
-				new SearchCatalogItem(1, "Riverside Hotel", 20, "Suite")
-			)
+			))
 		));
 
 		mockMvc.perform(searchRequest())
@@ -114,7 +113,9 @@ class StaySearchControllerTests {
 				.value(false))
 			.andExpect(jsonPath("$.stays[0].roomTypes[0].offers[0].price.currency")
 				.value("KRW"))
-			.andExpect(jsonPath("$.stays[0].roomTypes[0].offers[0].price.totalAmount")
+			.andExpect(jsonPath(
+				"$.stays[0].roomTypes[0].offers[0].price.totalAmountIncludingTax"
+			)
 				.value(429_000))
 			.andExpect(jsonPath("$.supplierResults[0].status").value("SUCCESS"))
 			.andExpect(jsonPath("$.supplierResults[0].acceptedOfferCount").value(2))
@@ -140,7 +141,11 @@ class StaySearchControllerTests {
 					outcome(
 						Supplier.SUPPLIER_A,
 						SupplierSearchStatus.SUCCESS,
-						List.of(offer),
+						List.of(new SearchOffer(
+							offer,
+							"Riverside Hotel",
+							"Deluxe"
+						)),
 						0,
 						0,
 						List.of()
@@ -153,13 +158,7 @@ class StaySearchControllerTests {
 						0,
 						List.of(SupplierFailureType.TIMEOUT)
 					)
-				),
-				List.of(new SearchCatalogItem(
-					1,
-					"Riverside Hotel",
-					10,
-					"Deluxe"
-				))
+				)
 			)
 		);
 
@@ -187,8 +186,7 @@ class StaySearchControllerTests {
 					0,
 					0,
 					List.of(SupplierFailureType.CATALOG_UNAVAILABLE)
-				)),
-				List.of()
+				))
 			)
 		);
 
@@ -213,8 +211,7 @@ class StaySearchControllerTests {
 					0,
 					1,
 					List.of()
-				)),
-				List.of()
+				))
 			)
 		);
 
@@ -245,7 +242,52 @@ class StaySearchControllerTests {
 	}
 
 	@Test
+	void rejectsStayLongerThanThirtyNightsBeforeCallingSupplier()
+		throws Exception {
+		mockMvc.perform(get("/api/v1/stays/search")
+				.param("checkIn", "2026-09-01")
+				.param("checkOut", "2026-10-02")
+				.param("adults", "2"))
+			.andExpect(status().isBadRequest())
+			.andExpect(jsonPath("$.code").value("INVALID_SEARCH_CRITERIA"))
+			.andExpect(jsonPath("$.message").value(
+				"stay must not exceed 30 nights"
+			));
+		verifyNoInteractions(searchService);
+	}
+
+	@Test
+	void defaultsChildrenToZero() throws Exception {
+		when(searchService.search(CRITERIA)).thenReturn(
+			new IntegratedSearchResult(
+				SearchStatus.COMPLETE,
+				List.of(outcome(
+					Supplier.SUPPLIER_A,
+					SupplierSearchStatus.SUCCESS,
+					List.of(),
+					0,
+					0,
+					List.of()
+				))
+			)
+		);
+
+		mockMvc.perform(get("/api/v1/stays/search")
+				.param("checkIn", "2026-09-01")
+				.param("checkOut", "2026-09-04")
+				.param("adults", "2"))
+			.andExpect(status().isOk())
+			.andExpect(jsonPath("$.searchCriteria.children").value(0));
+	}
+
+	@Test
 	void rejectsMissingOrMalformedSearchParameter() throws Exception {
+		mockMvc.perform(get("/api/v1/stays/search")
+				.param("checkIn", "2026-09-01")
+				.param("checkOut", "2026-09-04"))
+			.andExpect(status().isBadRequest())
+			.andExpect(jsonPath("$.code").value("INVALID_REQUEST_PARAMETER"));
+
 		mockMvc.perform(get("/api/v1/stays/search")
 				.param("checkIn", "not-a-date")
 				.param("checkOut", "2026-09-04")
@@ -270,7 +312,7 @@ class StaySearchControllerTests {
 	private SupplierSearchOutcome outcome(
 		Supplier supplier,
 		SupplierSearchStatus status,
-		List<Offer> offers,
+		List<SearchOffer> searchOffers,
 		int rejectedOfferCount,
 		int unavailableOfferCount,
 		List<SupplierFailureType> failureTypes
@@ -278,7 +320,7 @@ class StaySearchControllerTests {
 		return new SupplierSearchOutcome(
 			supplier,
 			status,
-			offers,
+			searchOffers,
 			rejectedOfferCount,
 			unavailableOfferCount,
 			failureTypes
