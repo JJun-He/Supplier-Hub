@@ -47,6 +47,13 @@ class SupplierSearchRequestTests {
 		)).isInstanceOf(IllegalArgumentException.class);
 	}
 
+	@Test
+	void rejectsPropertyCodeContainingCsvDelimiter() {
+		assertThatThrownBy(() -> property(1, "P-1,P-2", 1, "R-1"))
+			.isInstanceOf(IllegalArgumentException.class)
+			.hasMessageContaining("must not contain a comma");
+	}
+
 	private PropertyMapping property(
 		long propertyId,
 		String propertyCode,

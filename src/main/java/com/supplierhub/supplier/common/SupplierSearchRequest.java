@@ -63,6 +63,11 @@ public record SupplierSearchRequest(
 				supplierPropertyCode,
 				"supplierPropertyCode"
 			);
+			if (supplierPropertyCode.contains(",")) {
+				throw new IllegalArgumentException(
+					"supplierPropertyCode must not contain a comma"
+				);
+			}
 			roomTypes = List.copyOf(Objects.requireNonNull(
 				roomTypes,
 				"roomTypes must not be null"

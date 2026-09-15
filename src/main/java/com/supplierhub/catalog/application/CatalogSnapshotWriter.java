@@ -242,8 +242,12 @@ public class CatalogSnapshotWriter implements CatalogSnapshotStore {
 			.count();
 		double missingRatio = (double) missingCount
 			/ existingActiveMappings.size();
-		if (missingCount >= bulkMissingMinimumCount
-			&& missingRatio > maximumMissingRatio) {
+		boolean allActiveMappingsMissing = missingCount
+			== existingActiveMappings.size();
+		boolean bulkMissingThresholdExceeded = missingCount
+			>= bulkMissingMinimumCount
+			&& missingRatio > maximumMissingRatio;
+		if (allActiveMappingsMissing || bulkMissingThresholdExceeded) {
 			throw new CatalogSnapshotRejectedException(
 				"Bulk missing " + mappingType + " rejected: missing="
 					+ missingCount + ", active="

@@ -395,6 +395,70 @@ class CatalogSnapshotWriterTests {
 		assertThat(roomTypeRepository.findAllActiveMappingsForSearch()).hasSize(20);
 	}
 
+	@Test
+	void rejectsCompleteReplacementOfSmallPropertyCatalog() {
+		List<CatalogProperty> originalProperties = IntStream.rangeClosed(1, 3)
+			.mapToObj(index -> catalogProperty(
+				"PROPERTY-" + index,
+				"Property " + index,
+				"ROOM-1",
+				"Room",
+				2
+			))
+			.toList();
+		snapshotStore.replace(new CatalogSnapshot(
+			Supplier.SUPPLIER_A,
+			originalProperties
+		));
+
+		assertThatThrownBy(() -> snapshotStore.replace(snapshot(
+			Supplier.SUPPLIER_A,
+			catalogProperty(
+				"REPLACEMENT-PROPERTY",
+				"Replacement Property",
+				"ROOM-1",
+				"Room",
+				2
+			)
+		)))
+			.isInstanceOf(CatalogSnapshotRejectedException.class)
+			.hasMessageContaining("Bulk missing properties");
+		assertThat(roomTypeRepository.findAllActiveMappingsForSearch()).hasSize(3);
+	}
+
+	@Test
+	void rejectsCompleteReplacementOfSmallRoomTypeCatalog() {
+		List<CatalogRoomType> originalRoomTypes = IntStream.rangeClosed(1, 3)
+			.mapToObj(index -> new CatalogRoomType(
+				"ROOM-" + index,
+				"Room " + index,
+				2
+			))
+			.toList();
+		snapshotStore.replace(snapshot(
+			Supplier.SUPPLIER_A,
+			new CatalogProperty(
+				"PROPERTY-1",
+				"Property",
+				originalRoomTypes
+			)
+		));
+
+		assertThatThrownBy(() -> snapshotStore.replace(snapshot(
+			Supplier.SUPPLIER_A,
+			catalogProperty(
+				"PROPERTY-1",
+				"Property",
+				"REPLACEMENT-ROOM",
+				"Replacement Room",
+				2
+			)
+		)))
+			.isInstanceOf(CatalogSnapshotRejectedException.class)
+			.hasMessageContaining("Bulk missing room types");
+		assertThat(roomTypeRepository.findAllActiveMappingsForSearch()).hasSize(3);
+	}
+
 	private CatalogSnapshot snapshot(
 		Supplier supplier,
 		String propertyName,

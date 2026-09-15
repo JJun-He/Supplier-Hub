@@ -17,6 +17,4 @@ public interface PropertyRepository extends JpaRepository<Property, Long> {
 
 	List<Property> findAllBySupplierOrderByIdAsc(Supplier supplier);
 
-	List<Property> findAllByActiveTrueOrderByIdAsc();
-
 }

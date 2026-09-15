@@ -43,6 +43,11 @@ public record CatalogSnapshot(
 				supplierPropertyCode,
 				"supplierPropertyCode"
 			);
+			if (supplierPropertyCode.contains(",")) {
+				throw new IllegalArgumentException(
+					"supplierPropertyCode must not contain a comma"
+				);
+			}
 			name = requireText(name, "name");
 			roomTypes = List.copyOf(Objects.requireNonNull(
 				roomTypes,
