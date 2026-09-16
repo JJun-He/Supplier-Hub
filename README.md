@@ -4,7 +4,7 @@
 
 ## 현재 상태
 
-목록 동기화부터 검색 API까지 기본 구현과 8-A 정확성·입력/예외 계약 보완을 마쳤습니다. 중간 기술 감사의 자원 제한·관측성·DB 동시성 작업은 남아 있습니다. 이 문서는 초기 실행 안내이며, 전체 연결 검증과 최종 문서 정리는 후속 단계에 진행합니다.
+목록 동기화부터 검색 API까지 구현하고 8-A~8-D 검증을 마쳤습니다. 실제 PostgreSQL·메인·Mock 프로세스를 연결해 정상 검색, 부분·전체 실패, timeout과 DB 잠금 후 복구를 확인했습니다. 고정 포트의 수동 실행 절차 재검증과 최종 문서 대조는 9단계에 남아 있습니다.
 
 - Java 21, Spring Boot 4.0.8, Gradle Wrapper
 - PostgreSQL 17, Flyway, Spring Data JPA
@@ -93,7 +93,7 @@ curl -X POST 'http://localhost:18080/control/b/mode?value=normal'
 
 `no-response`는 Mock이 응답을 30초 지연하는 방식입니다. A의 `error`는 HTTP 오류, B의 `error`는 HTTP 200 안의 본문 오류입니다. 모드는 Mock 프로세스 메모리에 유지되고 재시작하면 초기화됩니다. 위 제어 API는 카탈로그 응답에는 적용되지 않습니다.
 
-표의 결과는 목록 준비 및 다른 오류가 없는 조건의 예상 동작입니다. 이번 문서 작성에서는 전체 프로세스 연결 시나리오를 새로 실행하지 않았으며, 정식 E2E 검증은 8-D에 남아 있습니다.
+위 장애·지연 모드의 고객 응답은 실제 프로세스를 연결한 [8-D E2E](docs/e2e-verification.md)에서 검증했습니다. E2E는 임시 DB와 자동 배정 포트를 사용하며, 위 고정 포트 수동 명령의 최종 재현 점검은 9단계에서 진행합니다.
 
 ## 빌드·테스트·종료
 
@@ -101,11 +101,17 @@ curl -X POST 'http://localhost:18080/control/b/mode?value=normal'
 # 두 애플리케이션 실행 JAR 생성
 ./gradlew :bootJar :mock-supplier:bootJar
 
-# 메인과 Mock의 정식 테스트
+# 메인과 Mock의 단위·통합 테스트
 ./gradlew test
+
+# 실제 DB·메인·Mock을 연결한 E2E
+./gradlew e2eTest
+
+# 위 테스트를 모두 포함한 검증
+./gradlew check
 ```
 
-2026-09-16의 8-C 검증 결과는 메인 270개·Mock 6개 통과이며 실패·오류·건너뜀은 없습니다. 최종 실행에서 메인은 전부 실행했고 변경 없는 Mock은 기존 성공 결과를 재사용했습니다. parameterized test의 각 입력 사례를 포함한 실행 건수입니다. 변경과 검증 기록은 [JOURNAL](JOURNAL.md), 감사 당시 검증과 한계는 [구조 감사](docs/structure-audit.md)에 있습니다.
+2026-09-16의 8-D 검증 결과는 **메인 270개·Mock 6개·E2E 9개, 실패·오류·건너뜀 0개**입니다. 이번 작업에서 메인과 E2E는 실제 실행했고 변경 없는 Mock은 기존 성공 결과를 재사용했습니다. parameterized test의 각 입력 사례를 포함한 건수입니다. E2E 실행 구성·검증 범위와 로그 위치는 [전체 연결 검증](docs/e2e-verification.md), 변경 기록은 [JOURNAL](JOURNAL.md)에 있습니다.
 
 실행 중인 두 `bootRun`은 각각 Ctrl+C로 종료합니다. DB 종료 명령은 다음과 같으며 데이터 볼륨은 유지됩니다.
 
@@ -129,10 +135,7 @@ docker compose down
 
 ## 다음 작업과 기술 선택
 
-8-A 입력/예외 계약, 8-B 자원 제한·업무 지표, 8-C 동기화 보호·DB 시간 예산을 완료했습니다.
-
-1. **8-D:** 실제 DB·Mock·고객 API 전체 연결 검증
-2. **9단계:** 실행 절차 재검증과 최종 설계·운영 한계 문서화
+8-A 입력/예외 계약, 8-B 자원 제한·업무 지표, 8-C 동기화 보호·DB 시간 예산, 8-D 전체 연결 검증을 완료했습니다. 다음은 **9단계 실행 절차 재검증과 최종 설계·운영 한계 문서화**입니다.
 
 요청당 Supplier 동시 호출은 4개이며, JVM 전체에서 Supplier별 검색 8개·카탈로그 1개로 추가 제한합니다. 한도를 넘으면 대기열 없이 `CAPACITY_EXCEEDED`로 분류하고 정상 Supplier 결과는 유지합니다. 응답 한도는 검색 2 MiB·카탈로그 8 MiB이며 초과하면 `RESPONSE_TOO_LARGE`입니다. 설정과 검증 범위는 [설계 §17](docs/architecture-decisions.md#17-8-b-자원-제한과-업무-지표)을 참고하세요. 감사 보고서의 본문은 감사 시점 기록이며, 수정 상태는 각 문서 상단 안내와 구현 진행표로 구분합니다.
 
@@ -158,6 +161,7 @@ curl -s http://localhost:8080/actuator/metrics/supplier.catalog.consecutive.fail
 ## 문서 안내
 
 - [구현 계획과 진행 상태](docs/implementation-plan.md)
+- [전체 연결 E2E 검증](docs/e2e-verification.md)
 - [정확성 감사](docs/correctness-audit.md)
 - [DB 감사](docs/database-audit.md)
 - [네트워크·메모리 감사](docs/network-memory-audit.md)

@@ -1,3 +1,5 @@
+import org.springframework.boot.gradle.tasks.bundling.BootJar
+
 plugins {
 	java
 	id("org.springframework.boot") version "4.0.8"
@@ -47,4 +49,46 @@ dependencies {
 
 tasks.withType<Test> {
 	useJUnitPlatform()
+}
+
+val e2eSourceSet = sourceSets.create("e2eTest")
+configurations[e2eSourceSet.implementationConfigurationName]
+	.extendsFrom(configurations.testImplementation.get())
+configurations[e2eSourceSet.runtimeOnlyConfigurationName]
+	.extendsFrom(configurations.testRuntimeOnly.get())
+
+val mockApplicationJar = configurations.create("mockApplicationJar") {
+	isCanBeConsumed = false
+	isCanBeResolved = true
+	isTransitive = false
+}
+dependencies {
+	add(mockApplicationJar.name, project(
+		path = ":mock-supplier",
+		configuration = "executableJar"
+	))
+}
+
+val applicationJar = tasks.named<BootJar>("bootJar").flatMap { it.archiveFile }
+val e2eLogDirectory = layout.buildDirectory.dir("reports/e2e")
+val e2eTest = tasks.register<Test>("e2eTest") {
+	description = "실제 DB와 메인·Mock 프로세스를 연결해 고객 API를 검증한다."
+	group = "verification"
+	testClassesDirs = e2eSourceSet.output.classesDirs
+	classpath = e2eSourceSet.runtimeClasspath
+	inputs.file(applicationJar).withPropertyName("applicationJar")
+	inputs.files(mockApplicationJar).withPropertyName("mockApplicationJar")
+	dependsOn(tasks.named("bootJar"), mockApplicationJar)
+	shouldRunAfter(tasks.named("test"), ":mock-supplier:test")
+	maxParallelForks = 1
+	doFirst {
+		systemProperty("e2e.app.jar", applicationJar.get().asFile.absolutePath)
+		systemProperty("e2e.mock.jar", mockApplicationJar.singleFile.absolutePath)
+		systemProperty("e2e.java.executable", javaLauncher.get().executablePath.asFile.absolutePath)
+		systemProperty("e2e.logs", e2eLogDirectory.get().asFile.absolutePath)
+	}
+}
+
+tasks.named("check") {
+	dependsOn(e2eTest)
 }

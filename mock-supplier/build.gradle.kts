@@ -27,3 +27,11 @@ dependencies {
 tasks.withType<Test> {
     useJUnitPlatform()
 }
+
+val executableJar = configurations.create("executableJar") {
+    isCanBeConsumed = true
+    isCanBeResolved = false
+}
+artifacts {
+    add(executableJar.name, tasks.named("bootJar"))
+}
