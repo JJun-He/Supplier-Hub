@@ -1,0 +1,144 @@
+{
+  "audit": "7.5-D 구조·SOLID·확장성·예외·테스트",
+  "recordedAt": "2026-09-16",
+  "baseCommit": "eff5bb83a940d8d29a778b9de0d041d888771388",
+  "method": "git worktree 격리 후 SUPPLIER_C를 실제 추가하고 컴파일러가 변경 지점을 열거하게 함. 원본 작업 트리는 변경하지 않음.",
+  "layerImportMatrix": {
+    "search/domain": {
+      "externalPackages": [
+        "com.supplierhub.catalog.domain"
+      ],
+      "spring": false,
+      "jpa": false,
+      "jackson": false,
+      "reactor": false,
+      "verdict": "순수 도메인"
+    },
+    "catalog/domain": {
+      "externalPackages": [
+        "jakarta.persistence"
+      ],
+      "verdict": "JPA Entity 결합"
+    },
+    "catalog/application": {
+      "leaks": [
+        "com.supplierhub.catalog.infrastructure"
+      ],
+      "verdict": "DIP 위반 (CatalogSnapshotWriter)"
+    },
+    "search/application": {
+      "externalPackages": [
+        "com.supplierhub.catalog.application",
+        "com.supplierhub.supplier.common"
+      ],
+      "verdict": "포트만 의존"
+    }
+  },
+  "supplierCExperiment": {
+    "compileErrorsFromEnumConstantAlone": {
+      "count": 1,
+      "sites": [
+        "supplier/common/SupplierIntegrationProperties.java:60 (exhaustive switch)"
+      ]
+    },
+    "mainFilesModified": {
+      "count": 4,
+      "insertions": 36,
+      "deletions": 1,
+      "files": [
+        "catalog/domain/Supplier.java",
+        "supplier/common/SupplierIntegrationProperties.java",
+        "supplier/common/SupplierClientConfiguration.java",
+        "src/main/resources/application.yaml"
+      ]
+    },
+    "mainFilesUnchanged": [
+      "search/application/IntegratedSearchService.java",
+      "catalog/application/CatalogSynchronizationService.java",
+      "search/application/OfferNormalizer.java",
+      "search/api/* (전체)",
+      "search/domain/* (전체)",
+      "catalog/infrastructure/* (전체)"
+    ],
+    "newPackages": [
+      "supplier/supplierc (어댑터 2개)"
+    ],
+    "testFilesModified": {
+      "count": 5,
+      "sites": 9,
+      "detail": {
+        "supplier/common/SupplierIntegrationPropertiesTests.java": 5,
+        "catalog/application/CatalogSynchronizationServiceTests.java": 1,
+        "search/application/IntegratedSearchServiceTests.java": 1,
+        "supplier/common/SupplierCatalogClientTests.java": 1,
+        "supplier/common/SupplierSearchClientTests.java": 1
+      },
+      "cause": "new SupplierIntegrationProperties(...) 위치 인자 생성. 모두 Supplier C 동작과 무관."
+    },
+    "guardObserved": "복제한 엔드포인트를 enabled=true로 두자 requireClientsForEnabledSuppliers가 'Enabled Suppliers have no search client: [SUPPLIER_C]'로 3개 테스트를 실패시킴. 가드는 설계대로 동작.",
+    "finalTestRun": {
+      "mainTests": 89,
+      "failures": 0,
+      "errors": 0
+    }
+  },
+  "exceptionSites": {
+    "catchBlocks": [
+      "catalog/application/CatalogSynchronizationService.java:96 SupplierIntegrationException",
+      "catalog/application/CatalogSynchronizationService.java:103 CatalogSnapshotRejectedException",
+      "catalog/application/CatalogSynchronizationService.java:110 RuntimeException (광범위)",
+      "search/api/StaySearchController.java:57 IllegalArgumentException",
+      "search/application/OfferNormalizer.java:83 IllegalArgumentException|ArithmeticException|NullPointerException",
+      "search/domain/Money.java:22 IllegalArgumentException (Currency 파싱, 좁음)"
+    ],
+    "reactorOperators": 13,
+    "globalFallbackHandler": false,
+    "controllerAdviceScope": "assignableTypes = StaySearchController.class"
+  },
+  "duplication": {
+    "requireTextCopies": [
+      "catalog/domain/RoomType.java:174",
+      "catalog/domain/Property.java:152",
+      "catalog/domain/CatalogSnapshot.java:95",
+      "search/application/SearchOffer.java:19",
+      "supplier/common/SupplierSearchRequest.java:116"
+    ],
+    "offerCreateAvailableProductionCallers": [
+      "search/application/OfferNormalizer.java:104"
+    ]
+  },
+  "testInfrastructure": {
+    "postgresContainersDeclared": 3,
+    "containerReuseConfigured": false,
+    "httpAdapterTests": "com.sun.net.httpserver (실제 HTTP)",
+    "dedicatedTestsForFailureMappers": 0,
+    "endToEndTests": 0,
+    "perClassTestCounts": {
+      "IntegratedSearchServiceTests": 11,
+      "CatalogSnapshotWriterTests": 11,
+      "SupplierSearchClientTests": 8,
+      "StaySearchControllerTests": 8,
+      "CatalogRepositoryTests": 7,
+      "SearchCriteriaTests": 6,
+      "OfferNormalizerTests": 6,
+      "SupplierIntegrationPropertiesTests": 5,
+      "SupplierCatalogClientTests": 5,
+      "PriceTests": 5,
+      "CatalogSynchronizationServiceTests": 5,
+      "StayInventoryTests": 4,
+      "SupplierSearchRequestTests": 3,
+      "OfferCandidateTests": 2,
+      "CatalogSnapshotTests": 1,
+      "CatalogSynchronizationSchedulerTests": 1,
+      "SupplierHubApplicationTests": 1
+    }
+  },
+  "supplierCMainDiff": "diff --git a/src/main/java/com/supplierhub/catalog/domain/Supplier.java b/src/main/java/com/supplierhub/catalog/domain/Supplier.java\nindex 8697aad..d2d4171 100644\n--- a/src/main/java/com/supplierhub/catalog/domain/Supplier.java\n+++ b/src/main/java/com/supplierhub/catalog/domain/Supplier.java\n@@ -3,6 +3,7 @@ package com.supplierhub.catalog.domain;\n public enum Supplier {\n \n \tSUPPLIER_A,\n-\tSUPPLIER_B\n+\tSUPPLIER_B,\n+\tSUPPLIER_C\n \n }\ndiff --git a/src/main/java/com/supplierhub/supplier/common/SupplierClientConfiguration.java b/src/main/java/com/supplierhub/supplier/common/SupplierClientConfiguration.java\nindex 9d5abdb..55708a5 100644\n--- a/src/main/java/com/supplierhub/supplier/common/SupplierClientConfiguration.java\n+++ b/src/main/java/com/supplierhub/supplier/common/SupplierClientConfiguration.java\n@@ -75,6 +75,34 @@ public class SupplierClientConfiguration {\n \t\t);\n \t}\n \n+\t@Bean\n+\t@Qualifier(\"supplierCWebClient\")\n+\tWebClient supplierCWebClient(\n+\t\tWebClient.Builder builder,\n+\t\tSupplierIntegrationProperties properties\n+\t) {\n+\t\treturn createWebClient(\n+\t\t\tbuilder,\n+\t\t\tproperties.c(),\n+\t\t\tproperties.catalog().connectTimeout(),\n+\t\t\tproperties.catalog().responseTimeout()\n+\t\t);\n+\t}\n+\n+\t@Bean\n+\t@Qualifier(\"supplierCSearchWebClient\")\n+\tWebClient supplierCSearchWebClient(\n+\t\tWebClient.Builder builder,\n+\t\tSupplierIntegrationProperties properties\n+\t) {\n+\t\treturn createWebClient(\n+\t\t\tbuilder,\n+\t\t\tproperties.c(),\n+\t\t\tproperties.search().connectTimeout(),\n+\t\t\tproperties.search().responseTimeout()\n+\t\t);\n+\t}\n+\n \tprivate WebClient createWebClient(\n \t\tWebClient.Builder builder,\n \t\tSupplierIntegrationProperties.Endpoint endpoint,\ndiff --git a/src/main/java/com/supplierhub/supplier/common/SupplierIntegrationProperties.java b/src/main/java/com/supplierhub/supplier/common/SupplierIntegrationProperties.java\nindex 3735008..736bd76 100644\n--- a/src/main/java/com/supplierhub/supplier/common/SupplierIntegrationProperties.java\n+++ b/src/main/java/com/supplierhub/supplier/common/SupplierIntegrationProperties.java\n@@ -21,6 +21,7 @@ import com.supplierhub.catalog.domain.Supplier;\n public record SupplierIntegrationProperties(\n \t@Valid @NotNull Endpoint a,\n \t@Valid @NotNull Endpoint b,\n+\t@Valid @NotNull Endpoint c,\n \t@Valid @NotNull Catalog catalog,\n \t@Valid @NotNull Search search\n ) {\n@@ -60,6 +61,7 @@ public record SupplierIntegrationProperties(\n \t\treturn switch (supplier) {\n \t\t\tcase SUPPLIER_A -> a.enabled();\n \t\t\tcase SUPPLIER_B -> b.enabled();\n+\t\t\tcase SUPPLIER_C -> c.enabled();\n \t\t};\n \t}\n \ndiff --git a/src/main/resources/application.yaml b/src/main/resources/application.yaml\nindex fc3f644..045c84a 100644\n--- a/src/main/resources/application.yaml\n+++ b/src/main/resources/application.yaml\n@@ -42,6 +42,10 @@ supplier:\n     enabled: ${SUPPLIER_B_ENABLED:true}\n     base-url: ${SUPPLIER_B_BASE_URL:http://localhost:18080}\n     api-key: ${SUPPLIER_B_API_KEY:mock-b-key}\n+  c:\n+    enabled: ${SUPPLIER_C_ENABLED:false}\n+    base-url: ${SUPPLIER_C_BASE_URL:http://localhost:18080}\n+    api-key: ${SUPPLIER_C_API_KEY:mock-c-key}\n   catalog:\n     enabled: ${SUPPLIER_CATALOG_ENABLED:true}\n     connect-timeout: ${SUPPLIER_CATALOG_CONNECT_TIMEOUT:500ms}\n",
+  "_review": {
+    "date": "2026-09-16",
+    "supersedingReview": "structure-review.json",
+    "note": "Original fields preserve the prior experiment record. Do not treat all verdicts/counts as reverified. The review and revised structure-audit.md qualify Supplier C evidence and correct static/exception claims.",
+    "correctedErrorOperatorCount": 14,
+    "supplierCExperimentRerun": false
+  }
+}

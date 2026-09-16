@@ -1,0 +1,332 @@
+{
+  "audit": "7.5-C network, memory, process-wide concurrency",
+  "date": "2026-09-15",
+  "commit": "eff5bb83a940d8d29a778b9de0d041d888771388",
+  "environment": {
+    "java": "21.0.12.1",
+    "springBoot": "4.0.8",
+    "reactorNetty": "1.3.7",
+    "tomcat": "11.0.24",
+    "postgresql": "17.11",
+    "network": "127.0.0.1 local Reactor Netty test servers",
+    "applicationChanged": false
+  },
+  "counts": {
+    "passed": 11,
+    "failed": 0,
+    "errors": 0,
+    "skipped": 0,
+    "priorBaselineTests": 95,
+    "baselineRerunThisAudit": false
+  },
+  "runs": [
+    {
+      "name": "network",
+      "method": "real local HTTP with production client configuration; fixed mapping reader",
+      "passed": 7,
+      "testCases": [
+        "AuditNetworkProbeTests.overallDeadlineClosesActiveSocketAndNeverStartsQueuedBatch",
+        "AuditNetworkProbeTests.responseAndCallTimeoutClosePeerConnectionsWithoutRetry",
+        "AuditNetworkProbeTests.batchesUseFiftyPropertiesAndAtMostFourCallsPerSupplier",
+        "AuditNetworkProbeTests.observesLargeValidCatalogResponseLimit",
+        "AuditNetworkProbeTests.observesTransportRetryAfterAbruptPeerDisconnect",
+        "AuditNetworkProbeTests.observesLargeValidSearchResponseLimit",
+        "AuditNetworkProbeTests.concurrencyLimitMultipliesAcrossCustomerSearches"
+      ],
+      "observations": [
+        "overallDeadline: completedOffer=1 sentA=2/3 queuedBatchNotSent=true peerSocketClosed=true recoverySuccess=true",
+        "timeout supplier=A kind=response elapsedMs=194 peerClosed=true requests=1 causes=SupplierIntegrationException -> WebClientRequestException -> ReadTimeoutException",
+        "timeout supplier=A kind=call elapsedMs=267 peerClosed=true requests=1 causes=SupplierIntegrationException -> TimeoutException",
+        "timeout supplier=B kind=response elapsedMs=202 peerClosed=true requests=1 causes=SupplierIntegrationException -> WebClientRequestException -> ReadTimeoutException",
+        "timeout supplier=B kind=call elapsedMs=268 peerClosed=true requests=1 causes=SupplierIntegrationException -> TimeoutException",
+        "batching 251 properties: callsA=6 callsB=6 peakA=4 peakB=4 sizes=[50, 50, 50, 50, 1, 50]",
+        "largeCatalog properties=3000 bytes=369797 causes=WebClientResponseException -> DataBufferLimitException",
+        "abruptDisconnect supplier=A requests=1 causes=SupplierIntegrationException -> WebClientRequestException -> PrematureCloseException",
+        "largeSearch bytes=613716 causes=WebClientResponseException -> DataBufferLimitException integrated=PARTIAL failures=[UNKNOWN]",
+        "customerConcurrency=8 configuredPerRequest=4 upstreamPeakA=32 upstreamPeakB=32 totalCalls=64"
+      ],
+      "logSha256": "93326ed70e02d9c48f58b7e31caf5f6a240eff8dbfb97db13803c383a4c043ca"
+    },
+    {
+      "name": "boot",
+      "method": "Spring Boot random-port Tomcat and real injected client; fixed mapping reader",
+      "passed": 2,
+      "testCases": [
+        "AuditBootNetworkProbeTests.customerDisconnectDoesNotImmediatelyCancelUpstream",
+        "AuditBootNetworkProbeTests.bodyFailureIsNotVisibleAsFailureInGenericHttpMetric"
+      ],
+      "observations": [
+        "customerDisconnect: 300ms after TCP reset upstreamRequests=2 peerClosed=0 completed=0",
+        "bodyFailureMetric: application=UNAVAILABLE meters=[MeterId{name='http.client.requests.active', tags=[tag(client.name=127.0.0.1),tag(exception=none),tag(method=GET),tag(outcome=UNKNOWN),tag(status=CLIENT_ERROR),tag(uri=none)]}, MeterId{name='http.client.requests', tags=[tag(client.name=127.0.0.1),tag(error=none),tag(exception=none),tag(method=GET),tag(outcome=SUCCESS),tag(status=200),tag(uri=none)]}]",
+        "runtime reactorNetty=1.3.7 maxConnections=500 poolAcquireDefaultMs=45000"
+      ],
+      "logSha256": "3021788c1bcdca71c740d842eddcef719c2e53580589d132e6dc8faa94b41c8c"
+    },
+    {
+      "name": "memory",
+      "method": "synthetic fixtures; instrumentation and caller-thread allocated bytes",
+      "passed": 2,
+      "testCases": [
+        "AuditMemoryProbeTests.measuresCatalogAndPerSearchAllocationWithNoOffers",
+        "AuditMemoryProbeTests.measuresReachableOfferGraphAndPublicResponse"
+      ],
+      "observations": [
+        "catalog properties=1000 rooms=5000 reachableBytes=1260064 objects=45003 emptySearchAllocatedBytes=[1633336, 1633280, 1633280, 1633280, 1633280] elapsedNanos=[2930750, 2806000, 2223166, 2440125, 2392834]",
+        "catalog properties=6000 rooms=30000 reachableBytes=7560064 objects=270003 emptySearchAllocatedBytes=[9798056, 9798616, 9798000, 9798000, 9798000] elapsedNanos=[11234375, 10446125, 11168625, 11535417, 11984750]",
+        "graph supplier=SUPPLIER_A offers=1000 nights=1 applicationBytes=324360 applicationObjects=12015 responseBytes=276400 responseObjects=10016",
+        "graph supplier=SUPPLIER_A offers=1000 nights=30 applicationBytes=3244360 applicationObjects=129015 responseBytes=276400 responseObjects=10016",
+        "graph supplier=SUPPLIER_B offers=1000 nights=1 applicationBytes=228336 applicationObjects=8014 responseBytes=276400 responseObjects=10016",
+        "graph supplier=SUPPLIER_B offers=1000 nights=30 applicationBytes=228336 applicationObjects=8014 responseBytes=276400 responseObjects=10016"
+      ],
+      "logSha256": "309082f8003fe795bc7b5e435f501fd740362b08d7698a4f92caba35400d6ca7"
+    }
+  ],
+  "availableJUnitSummaries": [
+    {
+      "name": "com.supplierhub.supplier.common.AuditBootNetworkProbeTests",
+      "tests": "2",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    {
+      "name": "com.supplierhub.supplier.common.AuditMemoryProbeTests",
+      "tests": "2",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    }
+  ],
+  "concurrency": {
+    "customers": 8,
+    "propertiesPerSupplierPerCustomer": 200,
+    "roomsPerProperty": 1,
+    "configuredConcurrencyPerSupplierPerCustomer": 4,
+    "observedPeakA": 32,
+    "observedPeakB": 32,
+    "totalHttpCalls": 64,
+    "timeoutsSeconds": {
+      "response": 6,
+      "call": 7,
+      "overall": 8
+    },
+    "tomcatEntryUsed": false,
+    "productionPoolSaturationTested": false
+  },
+  "batching": {
+    "propertiesPerSupplier": 251,
+    "callsA": 6,
+    "callsB": 6,
+    "peakA": 4,
+    "peakB": 4,
+    "observedPropertyCountsA": [
+      50,
+      50,
+      50,
+      50,
+      1,
+      50
+    ]
+  },
+  "responseLimits": {
+    "observedMaxBufferBytes": 262144,
+    "catalog": {
+      "supplier": "A",
+      "properties": 3000,
+      "roomsPerProperty": 1,
+      "bodyBytes": 369797
+    },
+    "search": {
+      "supplier": "A",
+      "properties": 50,
+      "roomsPerProperty": 5,
+      "nights": 30,
+      "offers": 250,
+      "bodyBytes": 613716,
+      "integratedStatusWithHealthyB": "PARTIAL",
+      "supplierFailureTypes": [
+        "UNKNOWN"
+      ]
+    },
+    "exceptionChain": [
+      "WebClientResponseException",
+      "DataBufferLimitException"
+    ],
+    "context": "WebClient.builder plus production SupplierClientConfiguration; not Boot-injected clients for large-body probes"
+  },
+  "cancellation": {
+    "overallTimeoutMs": 700,
+    "aPlannedBatches": 3,
+    "aSentBatches": 2,
+    "completedOffersKept": 1,
+    "queuedBatchNotSent": true,
+    "peerConnectionClosed": true,
+    "subsequentRequestSucceeded": true,
+    "peerClosureObservationBudgetMs": 2000,
+    "customerDisconnect": {
+      "realTomcat": true,
+      "disconnect": "TCP RST",
+      "observationAfterDisconnectMs": 300,
+      "supplierRequestsStillInProgress": 2,
+      "peerConnectionsClosed": 0,
+      "completedSupplierRequests": 0
+    }
+  },
+  "poolConfiguration": {
+    "runtimeMaxConnections": 500,
+    "runtimeDefaultAcquireTimeoutMs": 45000,
+    "defaultPendingMaxBySource": 1000,
+    "sourceVersion": "1.3.7",
+    "scope": "pool key includes remote address and channel configuration; not one global Supplier limit",
+    "pendingQueueSaturationTested": false
+  },
+  "memory": {
+    "catalogMeasurements": [
+      {
+        "properties": 1000,
+        "rooms": 5000,
+        "projectionReachableBytes": 1260064,
+        "projectionObjects": 45003,
+        "searchAllocatedBytesSamples": [
+          1633336,
+          1633280,
+          1633280,
+          1633280,
+          1633280
+        ],
+        "elapsedNanosSamples": [
+          2930750,
+          2806000,
+          2223166,
+          2440125,
+          2392834
+        ],
+        "medianAllocatedBytes": 1633280,
+        "medianElapsedNanos": 2440125
+      },
+      {
+        "properties": 6000,
+        "rooms": 30000,
+        "projectionReachableBytes": 7560064,
+        "projectionObjects": 270003,
+        "searchAllocatedBytesSamples": [
+          9798056,
+          9798616,
+          9798000,
+          9798000,
+          9798000
+        ],
+        "elapsedNanosSamples": [
+          11234375,
+          10446125,
+          11168625,
+          11535417,
+          11984750
+        ],
+        "medianAllocatedBytes": 9798000,
+        "medianElapsedNanos": 11234375
+      }
+    ],
+    "offerGraphs": [
+      {
+        "supplier": "SUPPLIER_A",
+        "offers": 1000,
+        "nights": 1,
+        "applicationReachableBytes": 324360,
+        "applicationObjects": 12015,
+        "responseReachableBytes": 276400,
+        "responseObjects": 10016
+      },
+      {
+        "supplier": "SUPPLIER_A",
+        "offers": 1000,
+        "nights": 30,
+        "applicationReachableBytes": 3244360,
+        "applicationObjects": 129015,
+        "responseReachableBytes": 276400,
+        "responseObjects": 10016
+      },
+      {
+        "supplier": "SUPPLIER_B",
+        "offers": 1000,
+        "nights": 1,
+        "applicationReachableBytes": 228336,
+        "applicationObjects": 8014,
+        "responseReachableBytes": 276400,
+        "responseObjects": 10016
+      },
+      {
+        "supplier": "SUPPLIER_B",
+        "offers": 1000,
+        "nights": 30,
+        "applicationReachableBytes": 228336,
+        "applicationObjects": 8014,
+        "responseReachableBytes": 276400,
+        "responseObjects": 10016
+      }
+    ],
+    "limitations": [
+      "Allocation is caller-thread cumulative bytes, not live or peak heap. It excludes fixture/projection creation, real HTTP/JSON, asynchronous threads and native memory.",
+      "Thread allocation includes logging and small measurement bookkeeping. Three warmups precede five samples.",
+      "Graph measurement sums shallow sizes of uniquely reachable objects, excludes static fields and stops traversing enum/Class references.",
+      "Graph sizes are not dominator-retained heap, serialized JSON, RSS or a load-test capacity estimate. Shared objects prevent simple summation of application and response graphs."
+    ]
+  },
+  "reproduction": {
+    "scratchDirectory": "/private/tmp/supplier-hub-network-audit",
+    "restore": "Restore each probeSources text to its relativeToScratchDirectory under scratchDirectory. Paths in init scripts assume that scratch directory. Sources are audit-only and assert current behavior; they are not permanent regression tests.",
+    "agentBuild": [
+      "javac -d agent/classes agent/audit/SizeAgent.java",
+      "Create agent/MANIFEST.MF with Premain-Class: audit.SizeAgent followed by a blank line",
+      "jar cfm agent/size-agent.jar agent/MANIFEST.MF -C agent/classes ."
+    ],
+    "gradleCommands": [
+      "./gradlew -I /private/tmp/supplier-hub-network-audit/audit.init.gradle :test --tests \"*AuditNetworkProbeTests\" --console=plain",
+      "./gradlew -I /private/tmp/supplier-hub-network-audit/audit.init.gradle :test --tests \"*AuditBootNetworkProbeTests\" --console=plain",
+      "./gradlew -I /private/tmp/supplier-hub-network-audit/memory.init.gradle :test --tests \"*AuditMemoryProbeTests\" --console=plain"
+    ],
+    "prerequisites": [
+      "Java 21 for javac, jar and Gradle",
+      "Docker for Boot Testcontainers test",
+      "Run agent build from scratch directory; run Gradle commands from repository",
+      "Gradle access to dependencies; temporary local ports",
+      "Capture each Gradle output separately: the second run replaces the first JUnit XML output directory"
+    ]
+  },
+  "probeSources": [
+    {
+      "relativeToScratchDirectory": "src/com/supplierhub/supplier/common/AuditBootNetworkProbeTests.java",
+      "sha256": "c1efcf52aab476e5dedbde994a18a80214897e9c1c7628b1bb7d3548bcb43184",
+      "text": "package com.supplierhub.supplier.common;\nimport static org.assertj.core.api.Assertions.*;\nimport static org.mockito.Mockito.*;\nimport java.net.*;\nimport java.nio.charset.StandardCharsets;\nimport java.time.*;\nimport java.util.*;\nimport java.util.concurrent.atomic.*;\nimport org.junit.jupiter.api.*;\nimport org.springframework.beans.factory.annotation.Autowired;\nimport org.springframework.boot.test.context.SpringBootTest;\nimport org.springframework.boot.test.web.server.LocalServerPort;\nimport org.springframework.boot.testcontainers.service.connection.ServiceConnection;\nimport org.springframework.test.context.DynamicPropertyRegistry;\nimport org.springframework.test.context.DynamicPropertySource;\nimport org.springframework.test.context.bean.override.mockito.MockitoBean;\nimport org.testcontainers.junit.jupiter.Container;\nimport org.testcontainers.postgresql.PostgreSQLContainer;\nimport reactor.core.publisher.*;\nimport reactor.netty.*;\nimport reactor.netty.http.server.*;\nimport io.micrometer.core.instrument.MeterRegistry;\nimport com.supplierhub.catalog.application.*;\nimport com.supplierhub.catalog.domain.Supplier;\nimport com.supplierhub.search.domain.SearchCriteria;\nimport com.supplierhub.supplier.supplierb.SupplierBSearchClient;\n\n@SpringBootTest(webEnvironment=SpringBootTest.WebEnvironment.RANDOM_PORT,properties=\"supplier.catalog.enabled=false\")\nclass AuditBootNetworkProbeTests {\n    @Container @ServiceConnection static final PostgreSQLContainer postgres=new PostgreSQLContainer(\"postgres:17-alpine\");\n    static final AtomicInteger started=new AtomicInteger(),closed=new AtomicInteger(),completed=new AtomicInteger();\n    static volatile boolean hold;\n    static volatile Sinks.One<String> release=Sinks.one();\n    static final DisposableServer upstream=HttpServer.create().host(\"127.0.0.1\").port(0).handle((req,res)->{\n        started.incrementAndGet();\n        if(hold) {\n            req.withConnection(c->c.onDispose().doFinally(s->closed.incrementAndGet()).subscribe());\n            String body=req.uri().startsWith(\"/a/\")?\"{\\\"items\\\":[]}\":\"{\\\"resultCode\\\":\\\"0000\\\",\\\"data\\\":{\\\"items\\\":[]}}\";\n            return res.header(\"Content-Type\",\"application/json\").sendString(release.asMono().thenReturn(body)).then().doFinally(s->completed.incrementAndGet());\n        }\n        return res.header(\"Content-Type\",\"application/json\").sendString(Mono.just(\"{\\\"resultCode\\\":\\\"E503\\\",\\\"data\\\":null}\")).then();\n    }).bindNow();\n    @DynamicPropertySource static void config(DynamicPropertyRegistry r) {\n        r.add(\"supplier.a.base-url\",()->\"http://127.0.0.1:\"+upstream.port());\n        r.add(\"supplier.b.base-url\",()->\"http://127.0.0.1:\"+upstream.port());\n    }\n    @LocalServerPort int port;\n    @MockitoBean ActiveCatalogMappingReader reader;\n    @Autowired SupplierBSearchClient client;\n    @Autowired MeterRegistry metrics;\n    @BeforeEach void reset() {\n        hold=false;release=Sinks.one();started.set(0);closed.set(0);completed.set(0);metrics.clear();\n        when(reader.findAllActive()).thenReturn(List.of(\n            new ActiveCatalogMapping(1,Supplier.SUPPLIER_A,\"P1\",\"One\",101,\"R1\",\"Room\"),\n            new ActiveCatalogMapping(2,Supplier.SUPPLIER_B,\"P2\",\"Two\",201,\"R2\",\"Room\")));\n    }\n    @AfterAll static void stop(){upstream.disposeNow();}\n    void await(java.util.function.BooleanSupplier condition) throws Exception {\n        long deadline=System.nanoTime()+Duration.ofSeconds(3).toNanos();\n        while(!condition.getAsBoolean()&&System.nanoTime()<deadline)Thread.sleep(10);\n        assertThat(condition.getAsBoolean()).isTrue();\n    }\n    @Test void customerDisconnectDoesNotImmediatelyCancelUpstream() throws Exception {\n        hold=true;\n        Socket socket=new Socket(\"127.0.0.1\",port);\n        try {\n            socket.getOutputStream().write((\"GET /api/v1/stays/search?checkIn=2026-10-01&checkOut=2026-10-04&adults=2 HTTP/1.1\\r\\nHost: localhost\\r\\nConnection: close\\r\\n\\r\\n\").getBytes(StandardCharsets.US_ASCII));\n            socket.getOutputStream().flush();\n            await(()->started.get()==2);\n            socket.setSoLinger(true,0);socket.close();\n            Thread.sleep(300);\n            assertThat(completed.get()).isZero();assertThat(closed.get()).isZero();\n            System.out.println(\"NETAUDIT customerDisconnect: 300ms after TCP reset upstreamRequests=2 peerClosed=0 completed=0\");\n        } finally {socket.close();release.tryEmitValue(\"go\");}\n        await(()->completed.get()==2);\n    }\n    @Test void bodyFailureIsNotVisibleAsFailureInGenericHttpMetric() {\n        var req=new SupplierSearchRequest(Supplier.SUPPLIER_B,new SearchCriteria(LocalDate.of(2026,10,1),LocalDate.of(2026,10,4),2,0),\n            List.of(new SupplierSearchRequest.PropertyMapping(2,\"P2\",List.of(new SupplierSearchRequest.RoomTypeMapping(201,\"R2\")))));\n        Throwable error=catchThrowable(()->client.search(req).block());\n        assertThat(error).isInstanceOfSatisfying(SupplierIntegrationException.class,e->assertThat(e.getFailureType()).isEqualTo(SupplierFailureType.UNAVAILABLE));\n        var meters=metrics.getMeters().stream().filter(m->m.getId().getName().contains(\"http.client\")||m.getId().getName().contains(\"supplier\")).map(m->m.getId().toString()).toList();\n        System.out.println(\"NETAUDIT bodyFailureMetric: application=UNAVAILABLE meters=\"+meters);\n        System.out.println(\"NETAUDIT runtime reactorNetty=\"+reactor.netty.http.client.HttpClient.class.getPackage().getImplementationVersion()+\" maxConnections=\"+reactor.netty.http.HttpResources.get().maxConnections()+\" poolAcquireDefaultMs=\"+reactor.netty.resources.ConnectionProvider.DEFAULT_POOL_ACQUIRE_TIMEOUT);\n    }\n}\n"
+    },
+    {
+      "relativeToScratchDirectory": "src/com/supplierhub/supplier/common/AuditMemoryProbeTests.java",
+      "sha256": "41a2a0165ce02a83d8f2445b40e80bbd19fc9c81b75dce7c2d2814558bfe2849",
+      "text": "package com.supplierhub.supplier.common;\nimport static org.assertj.core.api.Assertions.*;\nimport java.net.URI;\nimport java.time.*;\nimport java.util.*;\nimport java.util.stream.*;\nimport org.junit.jupiter.api.Test;\nimport reactor.core.publisher.Mono;\nimport com.supplierhub.catalog.application.*;\nimport com.supplierhub.catalog.domain.Supplier;\nimport com.supplierhub.search.application.*;\nimport com.supplierhub.search.domain.*;\nimport com.supplierhub.search.api.StaySearchResponse;\n\nclass AuditMemoryProbeTests {\n    static final Supplier A=Supplier.SUPPLIER_A,B=Supplier.SUPPLIER_B;\n    long[] size(Object root) throws Exception {return (long[])Class.forName(\"audit.SizeAgent\").getMethod(\"size\",Object.class).invoke(null,root);}\n    SearchCriteria criteria(int nights) {return new SearchCriteria(LocalDate.of(2026,10,1),LocalDate.of(2026,10,1).plusDays(nights),2,0);}\n    IntegratedSearchResult result(Supplier supplier,int nights) {\n        var criteria=criteria(nights);\n        var items=IntStream.rangeClosed(1,1000).mapToObj(i->{\n            Price price=supplier==A?Price.fromNightlyPrices(IntStream.range(0,nights).mapToObj(d->new NightlyPrice(criteria.checkIn().plusDays(d),Money.of(\"KRW\",10000),Money.of(\"KRW\",1000))).toList()):Price.totalOnly(Money.of(\"KRW\",11000L*nights));\n            var inventory=IntStream.range(0,nights).mapToObj(d->new DailyInventory(criteria.checkIn().plusDays(d),2)).toList();\n            var offer=Offer.createAvailable(i,i,supplier,2,false,price,criteria,inventory).orElseThrow();\n            return new SearchOffer(offer,\"Property \"+i,\"Room \"+i);\n        }).toList();\n        return new IntegratedSearchResult(SearchStatus.COMPLETE,List.of(new SupplierSearchOutcome(supplier,SupplierSearchStatus.SUCCESS,items,0,0,List.of())));\n    }\n    @Test void measuresReachableOfferGraphAndPublicResponse() throws Exception {\n        for(Supplier supplier:List.of(A,B))for(int nights:List.of(1,30)) {\n            var result=result(supplier,nights);var graph=size(result);var response=size(StaySearchResponse.from(criteria(nights),result));\n            System.out.println(\"NETAUDIT graph supplier=\"+supplier+\" offers=1000 nights=\"+nights+\" applicationBytes=\"+graph[0]+\" applicationObjects=\"+graph[1]+\" responseBytes=\"+response[0]+\" responseObjects=\"+response[1]);\n            assertThat(response[0]).isGreaterThan(0);\n        }\n    }\n    @Test void measuresCatalogAndPerSearchAllocationWithNoOffers() throws Exception {\n        var mx=(com.sun.management.ThreadMXBean)java.lang.management.ManagementFactory.getThreadMXBean();\n        assertThat(mx.isThreadAllocatedMemorySupported()).isTrue();mx.setThreadAllocatedMemoryEnabled(true);\n        for(int properties:List.of(1000,6000)) {\n            List<ActiveCatalogMapping> rows=IntStream.rangeClosed(1,properties).boxed().flatMap(i->IntStream.rangeClosed(1,5).mapToObj(j->\n                new ActiveCatalogMapping(i,A,\"P\"+i,\"Property \"+i,i*100L+j,\"R\"+j,\"Room \"+j))).toList();\n            var p=new SupplierIntegrationProperties(new SupplierIntegrationProperties.Endpoint(true,URI.create(\"http://localhost\"),\"test\"),new SupplierIntegrationProperties.Endpoint(false,URI.create(\"http://localhost\"),\"test\"),\n                new SupplierIntegrationProperties.Catalog(true,Duration.ofSeconds(1),Duration.ofSeconds(2),Duration.ofSeconds(3),0,Duration.ofMillis(1),Duration.ZERO,Duration.ofMinutes(10),10,0.5),\n                new SupplierIntegrationProperties.Search(Duration.ofSeconds(1),Duration.ofSeconds(2),Duration.ofSeconds(3),Duration.ofSeconds(10),4));\n            SupplierSearchClient client=new SupplierSearchClient(){\n                public Supplier supplier(){return A;}\n                public Mono<SupplierSearchResult> search(SupplierSearchRequest request){return Mono.just(new SupplierSearchResult(A,List.of(),0,0));}\n            };\n            var service=new IntegratedSearchService(()->rows,List.of(client),p);\n            for(int warm=0;warm<3;warm++)service.search(criteria(1));\n            List<Long> allocations=new ArrayList<>();List<Long> nanos=new ArrayList<>();\n            for(int run=0;run<5;run++) {\n                long before=mx.getThreadAllocatedBytes(Thread.currentThread().threadId());long start=System.nanoTime();\n                var result=service.search(criteria(1));\n                nanos.add(System.nanoTime()-start);allocations.add(mx.getThreadAllocatedBytes(Thread.currentThread().threadId())-before);\n                assertThat(result.offers()).isEmpty();assertThat(result.status()).isEqualTo(SearchStatus.COMPLETE);\n            }\n            long[] graph=size(rows);\n            System.out.println(\"NETAUDIT catalog properties=\"+properties+\" rooms=\"+(properties*5)+\" reachableBytes=\"+graph[0]+\" objects=\"+graph[1]+\" emptySearchAllocatedBytes=\"+allocations+\" elapsedNanos=\"+nanos);\n        }\n    }\n}\n"
+    },
+    {
+      "relativeToScratchDirectory": "src/com/supplierhub/supplier/common/AuditNetworkProbeTests.java",
+      "sha256": "43a8f4d03996a56753481b40fa7710e90910bb728a383143e047c1332462c9e5",
+      "text": "package com.supplierhub.supplier.common;\nimport static org.assertj.core.api.Assertions.*;\nimport java.net.URI;\nimport java.time.*;\nimport java.util.*;\nimport java.util.concurrent.*;\nimport java.util.concurrent.atomic.*;\nimport java.util.function.BiFunction;\nimport java.util.stream.*;\nimport org.junit.jupiter.api.*;\nimport org.reactivestreams.Publisher;\nimport org.springframework.web.reactive.function.client.WebClient;\nimport reactor.core.publisher.*;\nimport reactor.netty.*;\nimport reactor.netty.http.server.*;\nimport com.supplierhub.catalog.application.*;\nimport com.supplierhub.catalog.domain.Supplier;\nimport com.supplierhub.search.application.*;\nimport com.supplierhub.search.domain.SearchCriteria;\nimport com.supplierhub.supplier.suppliera.*;\nimport com.supplierhub.supplier.supplierb.*;\n\nclass AuditNetworkProbeTests {\n    static final Supplier A=Supplier.SUPPLIER_A,B=Supplier.SUPPLIER_B;\n    static final SearchCriteria CRITERIA=new SearchCriteria(LocalDate.of(2026,10,1),LocalDate.of(2026,10,4),2,0);\n    static final String EMPTY_A=\"{\\\"items\\\":[]}\", EMPTY_B=\"{\\\"resultCode\\\":\\\"0000\\\",\\\"data\\\":{\\\"items\\\":[]}}\";\n    DisposableServer serverA,serverB;\n    volatile BiFunction<HttpServerRequest,HttpServerResponse,Publisher<Void>> handlerA,handlerB;\n    AtomicInteger callsA=new AtomicInteger(),callsB=new AtomicInteger(),activeA=new AtomicInteger(),activeB=new AtomicInteger(),peakA=new AtomicInteger(),peakB=new AtomicInteger();\n    @BeforeEach void start() {\n        handlerA=(req,res)->json(res,EMPTY_A); handlerB=(req,res)->json(res,EMPTY_B);\n        serverA=HttpServer.create().host(\"127.0.0.1\").port(0).handle((req,res)->observe(req,res,true)).bindNow();\n        serverB=HttpServer.create().host(\"127.0.0.1\").port(0).handle((req,res)->observe(req,res,false)).bindNow();\n    }\n    Publisher<Void> observe(HttpServerRequest req,HttpServerResponse res,boolean isA) {\n        var active=isA?activeA:activeB; var peak=isA?peakA:peakB;\n        (isA?callsA:callsB).incrementAndGet(); peak.accumulateAndGet(active.incrementAndGet(),Math::max);\n        return Mono.from((isA?handlerA:handlerB).apply(req,res)).doFinally(sig->active.decrementAndGet());\n    }\n    Publisher<Void> json(HttpServerResponse res,String body) { return res.header(\"Content-Type\",\"application/json\").sendString(Mono.just(body)).then(); }\n    @AfterEach void stop() { serverA.disposeNow();serverB.disposeNow(); }\n    void await(java.util.function.BooleanSupplier condition,long millis) throws Exception {\n        long deadline=System.nanoTime()+Duration.ofMillis(millis).toNanos();\n        while(!condition.getAsBoolean()&&System.nanoTime()<deadline)Thread.sleep(10);\n        assertThat(condition.getAsBoolean()).isTrue();\n    }\n    SupplierIntegrationProperties settings(Duration response,Duration call,Duration overall,int concurrency) {\n        return new SupplierIntegrationProperties(\n            new SupplierIntegrationProperties.Endpoint(true,URI.create(\"http://127.0.0.1:\"+serverA.port()),\"test-a\"),\n            new SupplierIntegrationProperties.Endpoint(true,URI.create(\"http://127.0.0.1:\"+serverB.port()),\"test-b\"),\n            new SupplierIntegrationProperties.Catalog(true,Duration.ofMillis(500),response,call,2,Duration.ofMillis(10),Duration.ZERO,Duration.ofMinutes(10),10,0.5),\n            new SupplierIntegrationProperties.Search(Duration.ofMillis(500),response,call,overall,concurrency));\n    }\n    SupplierASearchClient a(SupplierIntegrationProperties p) { return new SupplierASearchClient(new SupplierClientConfiguration().supplierASearchWebClient(WebClient.builder(),p),p); }\n    SupplierBSearchClient b(SupplierIntegrationProperties p) { return new SupplierBSearchClient(new SupplierClientConfiguration().supplierBSearchWebClient(WebClient.builder(),p),p); }\n    List<ActiveCatalogMapping> mappings(Supplier s,int count,int roomCount) {\n        return IntStream.rangeClosed(1,count).boxed().flatMap(i -> IntStream.rangeClosed(1,roomCount).mapToObj(j ->\n            new ActiveCatalogMapping((s==A?0:100000)+i,s,\"P\"+i,\"Property \"+i,(s==A?0:10000000)+i*100L+j,\"R\"+j,\"Room \"+j))).toList();\n    }\n    SupplierSearchRequest request(Supplier s,int count,int roomCount,SearchCriteria criteria) {\n        return new SupplierSearchRequest(s,criteria,IntStream.rangeClosed(1,count).mapToObj(i ->\n            new SupplierSearchRequest.PropertyMapping(i,\"P\"+i,IntStream.rangeClosed(1,roomCount).mapToObj(j ->\n                new SupplierSearchRequest.RoomTypeMapping(i*100L+j,\"R\"+j)).toList())).toList());\n    }\n    IntegratedSearchService service(int countA,int countB,SupplierIntegrationProperties p) {\n        List<ActiveCatalogMapping> rows=Stream.concat(mappings(A,countA,1).stream(),mappings(B,countB,1).stream()).toList();\n        return new IntegratedSearchService(()->rows,List.of(a(p),b(p)),p);\n    }\n    void emit(String value) { System.out.println(\"NETAUDIT \"+value); }\n    String causes(Throwable t) { List<String> all=new ArrayList<>();for(Throwable c=t;c!=null;c=c.getCause())all.add(c.getClass().getSimpleName());return String.join(\" -> \",all); }\n\n    @Test void concurrencyLimitMultipliesAcrossCustomerSearches() throws Exception {\n        Sinks.One<String> gateA=Sinks.one(),gateB=Sinks.one();\n        handlerA=(req,res)->res.header(\"Content-Type\",\"application/json\").sendString(gateA.asMono()).then();\n        handlerB=(req,res)->res.header(\"Content-Type\",\"application/json\").sendString(gateB.asMono()).then();\n        var p=settings(Duration.ofSeconds(6),Duration.ofSeconds(7),Duration.ofSeconds(8),4);\n        var service=service(200,200,p);\n        try(var pool=Executors.newFixedThreadPool(8)) {\n            List<Future<IntegratedSearchResult>> futures=IntStream.range(0,8).mapToObj(i -> pool.submit(()->service.search(CRITERIA))).toList();\n            try { await(()->callsA.get()==32&&callsB.get()==32,4000); }\n            finally { gateA.tryEmitValue(EMPTY_A);gateB.tryEmitValue(EMPTY_B); }\n            for(var future:futures)assertThat(future.get(5,TimeUnit.SECONDS).status()).isEqualTo(SearchStatus.COMPLETE);\n            assertThat(peakA.get()).isEqualTo(32);assertThat(peakB.get()).isEqualTo(32);\n            emit(\"customerConcurrency=8 configuredPerRequest=4 upstreamPeakA=\"+peakA+\" upstreamPeakB=\"+peakB+\" totalCalls=64\");\n        }\n    }\n\n    @Test void batchesUseFiftyPropertiesAndAtMostFourCallsPerSupplier() {\n        List<Integer> sizes=new CopyOnWriteArrayList<>();\n        handlerA=(req,res)->{\n            String codes=req.uri().split(\"hotelCodes=\")[1].split(\"&\")[0]; sizes.add(codes.split(\",|%2C\").length);\n            return res.header(\"Content-Type\",\"application/json\").sendString(Mono.delay(Duration.ofMillis(100)).thenReturn(EMPTY_A)).then();\n        };\n        handlerB=(req,res)->res.header(\"Content-Type\",\"application/json\").sendString(Mono.delay(Duration.ofMillis(100)).thenReturn(EMPTY_B)).then();\n        var result=service(251,251,settings(Duration.ofSeconds(2),Duration.ofSeconds(3),Duration.ofSeconds(5),4)).search(CRITERIA);\n        assertThat(result.status()).isEqualTo(SearchStatus.COMPLETE);\n        assertThat(callsA.get()).isEqualTo(6);assertThat(callsB.get()).isEqualTo(6);\n        assertThat(peakA.get()).isLessThanOrEqualTo(4);assertThat(peakB.get()).isLessThanOrEqualTo(4);\n        assertThat(sizes).containsExactlyInAnyOrder(50,50,50,50,50,1);\n        emit(\"batching 251 properties: callsA=6 callsB=6 peakA=\"+peakA+\" peakB=\"+peakB+\" sizes=\"+sizes);\n    }\n\n    @Test void overallDeadlineClosesActiveSocketAndNeverStartsQueuedBatch() throws Exception {\n        AtomicBoolean hangingClosed=new AtomicBoolean();\n        handlerA=(req,res)->{\n            if(callsA.get()==1)return json(res,\"{\\\"items\\\":[\"+itemA(1,1,3)+\"]}\");\n            req.withConnection(conn->conn.onDispose().doFinally(sig->hangingClosed.set(true)).subscribe());\n            return res.sendString(Mono.never()).then();\n        };\n        var p=settings(Duration.ofSeconds(3),Duration.ofSeconds(4),Duration.ofMillis(700),1);\n        var result=service(101,1,p).search(CRITERIA);\n        assertThat(result.status()).isEqualTo(SearchStatus.PARTIAL);assertThat(result.offers()).hasSize(1);\n        assertThat(callsA.get()).isEqualTo(2);await(hangingClosed::get,2000);\n        handlerA=(req,res)->json(res,EMPTY_A);\n        assertThat(a(p).search(request(A,1,1,CRITERIA)).block().offers()).isEmpty();\n        emit(\"overallDeadline: completedOffer=1 sentA=2/3 queuedBatchNotSent=true peerSocketClosed=true recoverySuccess=true\");\n    }\n\n    @Test void responseAndCallTimeoutClosePeerConnectionsWithoutRetry() throws Exception {\n        for(boolean isA:List.of(true,false)) {\n            for(boolean responseFirst:List.of(true,false)) {\n                AtomicBoolean closed=new AtomicBoolean();\n                BiFunction<HttpServerRequest,HttpServerResponse,Publisher<Void>> never=(req,res)->{\n                    req.withConnection(conn->conn.onDispose().doFinally(sig->closed.set(true)).subscribe());\n                    return res.sendString(Mono.never()).then();\n                };\n                if(isA)handlerA=never;else handlerB=never;\n                var p=settings(responseFirst?Duration.ofMillis(180):Duration.ofSeconds(2),responseFirst?Duration.ofSeconds(3):Duration.ofMillis(250),Duration.ofSeconds(5),4);\n                int before=(isA?callsA:callsB).get(); long start=System.nanoTime();\n                Throwable error=catchThrowable(()->(isA?a(p):b(p)).search(request(isA?A:B,1,1,CRITERIA)).block());\n                assertThat(error).isInstanceOfSatisfying(SupplierIntegrationException.class,e->assertThat(e.getFailureType()).isEqualTo(SupplierFailureType.TIMEOUT));\n                await(closed::get,2000);assertThat((isA?callsA:callsB).get()-before).isEqualTo(1);\n                emit(\"timeout supplier=\"+(isA?\"A\":\"B\")+\" kind=\"+(responseFirst?\"response\":\"call\")+\" elapsedMs=\"+Duration.ofNanos(System.nanoTime()-start).toMillis()+\" peerClosed=true requests=1 causes=\"+causes(error));\n            }\n        }\n    }\n\n    @Test void observesTransportRetryAfterAbruptPeerDisconnect() {\n        handlerA=(req,res)->{req.withConnection(Connection::dispose);return Mono.never();};\n        var p=settings(Duration.ofSeconds(1),Duration.ofSeconds(2),Duration.ofSeconds(3),4);\n        Throwable error=catchThrowable(()->a(p).search(request(A,1,1,CRITERIA)).block());\n        assertThat(error).isNotNull();\n        emit(\"abruptDisconnect supplier=A requests=\"+callsA+\" causes=\"+causes(error));\n    }\n\n    String itemA(int property,int room,int nights) {\n        String days=IntStream.range(0,nights).mapToObj(d->\"{\\\"date\\\":\\\"\"+LocalDate.of(2026,10,1).plusDays(d)+\"\\\",\\\"remainingRooms\\\":2,\\\"nightlyRate\\\":10000,\\\"taxAmount\\\":1000}\").collect(Collectors.joining(\",\"));\n        return \"{\\\"hotelCode\\\":\\\"P\"+property+\"\\\",\\\"roomTypeCode\\\":\\\"R\"+room+\"\\\",\\\"maxOccupancy\\\":2,\\\"breakfastIncluded\\\":false,\\\"currency\\\":\\\"KRW\\\",\\\"dailyRates\\\":[\"+days+\"]}\";\n    }\n    @Test void observesLargeValidSearchResponseLimit() {\n        String items=IntStream.rangeClosed(1,50).boxed().flatMap(i->IntStream.rangeClosed(1,5).mapToObj(j->itemA(i,j,30))).collect(Collectors.joining(\",\"));\n        String body=\"{\\\"items\\\":[\"+items+\"]}\"; handlerA=(req,res)->json(res,body);\n        var criteria=new SearchCriteria(LocalDate.of(2026,10,1),LocalDate.of(2026,10,31),2,0);\n        var p=settings(Duration.ofSeconds(2),Duration.ofSeconds(3),Duration.ofSeconds(5),4);\n        Throwable error=catchThrowable(()->a(p).search(request(A,50,5,criteria)).block());\n        assertThat(error).isNotNull();\n        var rows=mappings(A,50,5);\n        var integrated=new IntegratedSearchService(()->Stream.concat(rows.stream(),mappings(B,1,1).stream()).toList(),List.of(a(p),b(p)),p).search(criteria);\n        emit(\"largeSearch bytes=\"+body.getBytes(java.nio.charset.StandardCharsets.UTF_8).length+\" causes=\"+causes(error)+\" integrated=\"+integrated.status()+\" failures=\"+integrated.supplierResults().getFirst().failureTypes());\n    }\n\n    @Test void observesLargeValidCatalogResponseLimit() {\n        String body=\"{\\\"items\\\":[\"+IntStream.rangeClosed(1,3000).mapToObj(i->\"{\\\"hotelCode\\\":\\\"P\"+i+\"\\\",\\\"hotelName\\\":\\\"Property \"+i+\"\\\",\\\"roomTypes\\\":[{\\\"roomTypeCode\\\":\\\"R\\\",\\\"roomTypeName\\\":\\\"Room\\\",\\\"maxOccupancy\\\":2}]}\").collect(Collectors.joining(\",\"))+\"]}\";\n        handlerA=(req,res)->json(res,body);\n        var p=settings(Duration.ofSeconds(2),Duration.ofSeconds(3),Duration.ofSeconds(5),4);\n        var client=new SupplierACatalogClient(new SupplierClientConfiguration().supplierAWebClient(WebClient.builder(),p));\n        Throwable error=catchThrowable(()->client.fetchCatalog().block());assertThat(error).isNotNull();\n        emit(\"largeCatalog properties=3000 bytes=\"+body.getBytes(java.nio.charset.StandardCharsets.UTF_8).length+\" causes=\"+causes(error));\n    }\n}\n"
+    },
+    {
+      "relativeToScratchDirectory": "agent/audit/SizeAgent.java",
+      "sha256": "878b9b20092c2931d2ef8f6c4e619238ebc595172236ac2af83b196628889db4",
+      "text": "package audit;\nimport java.lang.instrument.Instrumentation;\nimport java.lang.reflect.*;\nimport java.util.*;\npublic class SizeAgent {\n    static Instrumentation instrumentation;\n    public static void premain(String args,Instrumentation value) { instrumentation=value; }\n    public static long[] size(Object root) throws Exception {\n        IdentityHashMap<Object,Boolean> seen=new IdentityHashMap<>();ArrayDeque<Object> queue=new ArrayDeque<>();queue.add(root);\n        long bytes=0,objects=0;\n        while(!queue.isEmpty()) {\n            Object object=queue.removeFirst();if(seen.put(object,Boolean.TRUE)!=null)continue;\n            bytes+=instrumentation.getObjectSize(object);objects++;\n            Class<?> type=object.getClass();\n            if(type.isArray()) {if(!type.getComponentType().isPrimitive())for(Object value:(Object[])object)if(value!=null)queue.add(value);continue;}\n            if(type.isEnum()||object instanceof Class<?>)continue;\n            for(Class<?> c=type;c!=null;c=c.getSuperclass())for(Field f:c.getDeclaredFields()) {\n                if(Modifier.isStatic(f.getModifiers())||f.getType().isPrimitive())continue;\n                if(!f.trySetAccessible())throw new IllegalStateException(\"Cannot inspect \"+f);\n                Object value=f.get(object);if(value!=null)queue.add(value);\n            }\n        }\n        return new long[]{bytes,objects};\n    }\n}\n"
+    },
+    {
+      "relativeToScratchDirectory": "audit.init.gradle",
+      "sha256": "c9fa4e4606c56c837b790d43c8e941b973740c5469c159929f284e73fce5c616",
+      "text": "allprojects { p ->\n    if (p == p.rootProject) {\n        p.plugins.withId('java') {\n            p.sourceSets.test.java.srcDir('/private/tmp/supplier-hub-network-audit/src')\n            p.tasks.named('test') {\n                reports.junitXml.outputLocation = p.layout.buildDirectory.dir('network-audit-results')\n                reports.html.outputLocation = p.layout.buildDirectory.dir('network-audit-report')\n                testLogging { showStandardStreams = true; events 'passed', 'failed' }\n            }\n        }\n    }\n}\n"
+    },
+    {
+      "relativeToScratchDirectory": "memory.init.gradle",
+      "sha256": "1781daac11246dad74437c0c3327dc408bf1b4025a9df73d66701a90fdd895a5",
+      "text": "allprojects { p ->\n    if (p == p.rootProject) {\n        p.plugins.withId('java') {\n            p.sourceSets.test.java.srcDir('/private/tmp/supplier-hub-network-audit/src')\n            p.tasks.named('test') {\n                jvmArgs '-javaagent:/private/tmp/supplier-hub-network-audit/agent/size-agent.jar', '--add-opens=java.base/java.util=ALL-UNNAMED', '--add-opens=java.base/java.lang=ALL-UNNAMED', '--add-opens=java.base/java.time=ALL-UNNAMED'\n                reports.junitXml.outputLocation = p.layout.buildDirectory.dir('memory-audit-results')\n                reports.html.outputLocation = p.layout.buildDirectory.dir('memory-audit-report')\n                testLogging { showStandardStreams = true; events 'passed', 'failed' }\n            }\n        }\n    }\n}\n"
+    }
+  ],
+  "officialReferences": [
+    "https://projectreactor.io/docs/netty/release/reference/http-client.html",
+    "https://docs.spring.io/spring-framework/reference/web/webflux-webclient/client-builder.html"
+  ]
+}

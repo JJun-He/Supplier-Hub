@@ -1,0 +1,852 @@
+{
+  "audit": "7.5-D structure audit re-review",
+  "reviewedAt": "2026-09-16",
+  "baseCommit": "eff5bb83a940d8d29a778b9de0d041d888771388",
+  "legacyInput": {
+    "reportSha256": "c1059a01fc756211f6b44b1cb521246961a56fa840730037b5829c2a922f32ff",
+    "evidenceSha256": "cffedadb6f7b3f4d0aaf33d2b3f6e2e3d5f7354e84f6db9f16aa2e40bd262048",
+    "supplierCExperimentRerun": false,
+    "retentionNote": "Only hashes and review corrections are retained for the earlier report; its full text is intentionally omitted."
+  },
+  "corrections": [
+    "Legacy Supplier C compile/test counts are prior recorded results, not rerun by this review; legacy JSON contains main diff but lacks added adapter sources, full test diff and XML.",
+    "Application depends on concrete SupplierIntegrationProperties as well as ports; search domain depends on catalog Supplier enum.",
+    "Reactor error operators counted from source: 13 onErrorMap plus 1 onErrorResume, total 14.",
+    "Body resultCode mapping belongs to the two Supplier B clients, not the common HTTP/transport failure mappers.",
+    "Buffer-limit failure does not itself prove an injected internal programming bug; this review separately injected IllegalStateException and mapper NPE.",
+    "Catalog unexpected failures already include WARN and stack trace and have a dedicated existing test.",
+    "Existing HTTP tests do not assert peer socket cancellation; that observation belongs to audit 7.5-C.",
+    "Container sharing requires data isolation and lifecycle design; reuse across test runs is not an unconditional CI optimization.",
+    "Supplier C YAML diff adds four lines. Offer.createAvailable has eight parameters. A has five distinct error HTTP statuses; B has five error codes plus success 0000.",
+    "Actual Boot default 500 JSON lacked code but did not reveal injected internal exception message in the tested configuration."
+  ],
+  "scope": {
+    "productChanged": false,
+    "formalTestsChanged": false,
+    "baselineTestsRerun": false,
+    "temporaryProbes": 6,
+    "catalogStore": "recording in-memory port, not real DB writer in catalog contract probes",
+    "apiProbe": "real Boot/Tomcat HTTP with MockitoBean search service and PostgreSQL Testcontainers context; not full supplier E2E"
+  },
+  "junitResults": [
+    {
+      "name": "com.supplierhub.audit.StructureApiProbeTests",
+      "tests": 1,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "cases": [
+        "unexpectedFailureReturnsDefault500WithoutLeakingInternalMessage()"
+      ]
+    },
+    {
+      "name": "com.supplierhub.audit.StructureBoundaryProbeTests",
+      "tests": 5,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "cases": [
+        "duplicateCatalogClientsAreBothAppliedInOneRun()",
+        "mapperNpeBecomesItemRejectionButIllegalStateEscapes()",
+        "catalogSnapshotSupplierMismatchReachesStoreEvenWhenDisabled()",
+        "enabledCatalogClientCanBeMissingWithoutStartupFailure()",
+        "unexpectedSearchAdapterBugBecomesUnknownPartial()"
+      ]
+    }
+  ],
+  "observations": [
+    "unexpectedApiError: status=500 body={\"timestamp\":\"2026-09-15T21:48:16.405Z\",\"status\":500,\"error\":\"Internal Server Error\",\"path\":\"/api/v1/stays/search\"}",
+    "duplicateCatalog: supplier=A storeCalls=2 synchronizationRuns=1",
+    "mapperBug: NPE=rejectedItem IllegalStateException=propagated",
+    "catalogMismatch: declared=A returned=B enabledB=false stored=[B]",
+    "missingEnabledCatalogClient: enabledA=true registeredBOnly=true stored=[B] noException=true",
+    "adapterBug: thrown=IllegalStateException status=PARTIAL failedA=UNKNOWN validBOffers=1"
+  ],
+  "staticEvidence": {
+    "testClasses": [
+      {
+        "file": "src/test/java/com/supplierhub/SupplierHubApplicationTests.java",
+        "testCount": 1,
+        "tests": [
+          "contextLoads"
+        ]
+      },
+      {
+        "file": "src/test/java/com/supplierhub/catalog/application/CatalogSnapshotWriterTests.java",
+        "testCount": 11,
+        "tests": [
+          "refreshesCatalogWhileKeepingInternalIds",
+          "deactivatesPropertyAfterTwoConsecutiveOmissionsAndReactivatesWithSameIds",
+          "deactivatesRoomTypeAfterTwoConsecutiveOmissionsAndResetsOnReappearance",
+          "resetsSuspectedPropertyOmissionWhenPropertyReappears",
+          "rejectsEmptyCatalogWhenActivePropertyMappingsExist",
+          "rejectsEmptyRoomCatalogWhenActiveRoomMappingsExist",
+          "replacesEachSupplierCatalogIndependently",
+          "rejectsSnapshotThatSuddenlyDropsMostProperties",
+          "rejectsSnapshotThatSuddenlyDropsMostRoomTypes",
+          "rejectsCompleteReplacementOfSmallPropertyCatalog",
+          "rejectsCompleteReplacementOfSmallRoomTypeCatalog"
+        ]
+      },
+      {
+        "file": "src/test/java/com/supplierhub/catalog/application/CatalogSynchronizationSchedulerTests.java",
+        "testCount": 1,
+        "tests": [
+          "runsInitialSynchronizationOnSchedulerThread"
+        ]
+      },
+      {
+        "file": "src/test/java/com/supplierhub/catalog/application/CatalogSynchronizationServiceTests.java",
+        "testCount": 5,
+        "tests": [
+          "retriesTransientFailureAndStoresSuccessfulSnapshot",
+          "doesNotRetryPermanentFailureAndContinuesWithOtherSupplier",
+          "logsUnexpectedFailureWithItsStackTrace",
+          "timesOutEachCatalogAttemptAndRetriesIt",
+          "doesNotSynchronizeDisabledSupplier"
+        ]
+      },
+      {
+        "file": "src/test/java/com/supplierhub/catalog/domain/CatalogSnapshotTests.java",
+        "testCount": 1,
+        "tests": [
+          "rejectsPropertyCodeContainingCsvDelimiter"
+        ]
+      },
+      {
+        "file": "src/test/java/com/supplierhub/catalog/infrastructure/CatalogRepositoryTests.java",
+        "testCount": 7,
+        "tests": [
+          "rejectsDuplicatePropertyCodeWithinSameSupplier",
+          "allowsSamePropertyCodeForDifferentSuppliers",
+          "rejectsDuplicateRoomTypeCodeWithinSameProperty",
+          "allowsSameRoomTypeCodeInDifferentProperties",
+          "findsInactiveMappingsForSynchronizationButExcludesThemFromSearch",
+          "excludesInactiveRoomTypeFromSearch",
+          "readsOnlyIdentifiersAndSupplierCodesForActiveSearchMappings"
+        ]
+      },
+      {
+        "file": "src/test/java/com/supplierhub/search/api/StaySearchControllerTests.java",
+        "testCount": 8,
+        "tests": [
+          "returnsGroupedCustomerSearchResponseWithoutSupplierCodes",
+          "returnsHttpOkAndFailureDetailsForPartialSearch",
+          "returnsHttpServiceUnavailableWhileKeepingFailureBody",
+          "returnsEmptyArraysForSuccessfulSearchWithoutAvailableOffers",
+          "rejectsInvalidSearchCriteriaBeforeCallingSupplier",
+          "rejectsStayLongerThanThirtyNightsBeforeCallingSupplier",
+          "defaultsChildrenToZero",
+          "rejectsMissingOrMalformedSearchParameter"
+        ]
+      },
+      {
+        "file": "src/test/java/com/supplierhub/search/application/IntegratedSearchServiceTests.java",
+        "testCount": 11,
+        "tests": [
+          "splitsFiftyOnePropertiesIntoFiftyAndOne",
+          "startsDifferentSuppliersBeforeEitherOneCompletes",
+          "limitsConcurrentCallsInsideOneSupplier",
+          "preservesCompletedOffersWhenAnotherBatchFails",
+          "cancelsPendingWorkAtOverallTimeoutAndKeepsCompletedBatch",
+          "reportsCatalogUnavailableWithoutCallingSupplier",
+          "marksRejectedSupplierItemsAsPartialWithoutTreatingSoldOutAsFailure",
+          "treatsNormalEmptyResultAsSuccessBesideFailedSupplier",
+          "reportsFailedWhenEverySupplierCallFails",
+          "rejectsEnabledSupplierWithoutMatchingClientAtStartup",
+          "ignoresDisabledSupplierMappingsAndDoesNotReportPartialResult"
+        ]
+      },
+      {
+        "file": "src/test/java/com/supplierhub/search/application/OfferNormalizerTests.java",
+        "testCount": 6,
+        "tests": [
+          "createsAvailableOfferWithWholeStayInventory",
+          "excludesSoldOutOfferWithoutTreatingItAsInvalid",
+          "excludesCapacityMismatchWithoutTreatingItAsInvalid",
+          "isolatesFailureWhileMappingRawSupplierItem",
+          "rejectsAndLogsCandidateFromDifferentSupplier",
+          "rejectsOfferWhoseNightlyPricesDoNotCoverTheStay"
+        ]
+      },
+      {
+        "file": "src/test/java/com/supplierhub/search/domain/OfferCandidateTests.java",
+        "testCount": 2,
+        "tests": [
+          "offerCanOnlyBeCreatedThroughItsValidationFactory",
+          "requiresCompleteValidatedCandidateValues"
+        ]
+      },
+      {
+        "file": "src/test/java/com/supplierhub/search/domain/PriceTests.java",
+        "testCount": 5,
+        "tests": [
+          "sumsNightlyNetRatesAndTaxesAsGrossStayTotal",
+          "preservesTaxIncludedStayTotalWithoutInventingNightlyPrices",
+          "rejectsDifferentBaseAndTaxCurrencies",
+          "rejectsDuplicateNightlyPriceDates",
+          "rejectsNegativeAmountsAndInvalidCurrencyCodes"
+        ]
+      },
+      {
+        "file": "src/test/java/com/supplierhub/search/domain/SearchCriteriaTests.java",
+        "testCount": 6,
+        "tests": [
+          "exposesStayDatesWithoutCheckoutDate",
+          "requiresCheckoutAfterCheckin",
+          "allowsThirtyNightsAndRejectsLongerStay",
+          "requiresNonNegativeGuestCounts",
+          "requiresAtLeastOneGuest",
+          "allowsSearchWithChildrenAndNoAdults"
+        ]
+      },
+      {
+        "file": "src/test/java/com/supplierhub/search/domain/StayInventoryTests.java",
+        "testCount": 4,
+        "tests": [
+          "usesMinimumDailyInventoryForTheWholeStay",
+          "marksTheStayUnavailableWhenAnyNightIsSoldOut",
+          "rejectsMissingDuplicateAndOutOfRangeDates",
+          "rejectsNegativeDailyInventory"
+        ]
+      },
+      {
+        "file": "src/test/java/com/supplierhub/supplier/common/SupplierCatalogClientTests.java",
+        "testCount": 5,
+        "tests": [
+          "supplierARequestsAndMapsCatalog",
+          "supplierAClassifiesServerFailureAsRetryable",
+          "supplierBRequestsAndMapsSuccessfulBody",
+          "supplierBClassifiesBodyFailureAsRetryable",
+          "supplierBClassifiesHttpAuthenticationFailure"
+        ]
+      },
+      {
+        "file": "src/test/java/com/supplierhub/supplier/common/SupplierIntegrationPropertiesTests.java",
+        "testCount": 5,
+        "tests": [
+          "rejectsBlankApiKeyAndNonPositiveSearchTimeout",
+          "acceptsConfiguredDefaults",
+          "rejectsNonPositiveOverallTimeoutAndSearchConcurrency",
+          "rejectsNonPositiveCatalogCallTimeout",
+          "rejectsInvalidBulkMissingThresholds"
+        ]
+      },
+      {
+        "file": "src/test/java/com/supplierhub/supplier/common/SupplierSearchClientTests.java",
+        "testCount": 8,
+        "tests": [
+          "supplierARequestsExactContractAndNormalizesNightlyPrices",
+          "supplierBRequestsExactContractAndPreservesTaxIncludedTotal",
+          "supplierAExcludesUnknownMappingWithoutLosingKnownSibling",
+          "supplierBExcludesItemWhoseTotalDoesNotIncludeTax",
+          "supplierBMapsBodyFailureToCommonFailure",
+          "supplierAStopsNoResponseAtCallTimeoutWithoutRetry",
+          "supplierAClassifiesRateLimitWithoutRetrying",
+          "supplierBClassifiesHttpRateLimitWithoutRetrying"
+        ]
+      },
+      {
+        "file": "src/test/java/com/supplierhub/supplier/common/SupplierSearchRequestTests.java",
+        "testCount": 3,
+        "tests": [
+          "rejectsMoreThanSupplierBulkLimit",
+          "rejectsDuplicateRoomCodeInsideProperty",
+          "rejectsPropertyCodeContainingCsvDelimiter"
+        ]
+      }
+    ],
+    "mainTestCount": 89,
+    "mockTestCount": 6,
+    "configurationConstructors": [
+      {
+        "file": "src/test/java/com/supplierhub/catalog/application/CatalogSynchronizationServiceTests.java",
+        "count": 1
+      },
+      {
+        "file": "src/test/java/com/supplierhub/search/application/IntegratedSearchServiceTests.java",
+        "count": 1
+      },
+      {
+        "file": "src/test/java/com/supplierhub/supplier/common/SupplierCatalogClientTests.java",
+        "count": 1
+      },
+      {
+        "file": "src/test/java/com/supplierhub/supplier/common/SupplierIntegrationPropertiesTests.java",
+        "count": 5
+      },
+      {
+        "file": "src/test/java/com/supplierhub/supplier/common/SupplierSearchClientTests.java",
+        "count": 1
+      }
+    ],
+    "errorOperators": [
+      {
+        "file": "src/main/java/com/supplierhub/catalog/application/CatalogSynchronizationService.java",
+        "line": 59,
+        "operator": ".onErrorMap("
+      },
+      {
+        "file": "src/main/java/com/supplierhub/search/application/IntegratedSearchService.java",
+        "line": 194,
+        "operator": ".onErrorResume(cause -> {"
+      },
+      {
+        "file": "src/main/java/com/supplierhub/supplier/suppliera/SupplierACatalogClient.java",
+        "line": 50,
+        "operator": ".onErrorMap("
+      },
+      {
+        "file": "src/main/java/com/supplierhub/supplier/suppliera/SupplierACatalogClient.java",
+        "line": 58,
+        "operator": ".onErrorMap("
+      },
+      {
+        "file": "src/main/java/com/supplierhub/supplier/suppliera/SupplierACatalogClient.java",
+        "line": 68,
+        "operator": ".onErrorMap("
+      },
+      {
+        "file": "src/main/java/com/supplierhub/supplier/suppliera/SupplierASearchClient.java",
+        "line": 80,
+        "operator": ".onErrorMap("
+      },
+      {
+        "file": "src/main/java/com/supplierhub/supplier/suppliera/SupplierASearchClient.java",
+        "line": 89,
+        "operator": ".onErrorMap("
+      },
+      {
+        "file": "src/main/java/com/supplierhub/supplier/suppliera/SupplierASearchClient.java",
+        "line": 97,
+        "operator": ".onErrorMap("
+      },
+      {
+        "file": "src/main/java/com/supplierhub/supplier/supplierb/SupplierBCatalogClient.java",
+        "line": 52,
+        "operator": ".onErrorMap("
+      },
+      {
+        "file": "src/main/java/com/supplierhub/supplier/supplierb/SupplierBCatalogClient.java",
+        "line": 60,
+        "operator": ".onErrorMap("
+      },
+      {
+        "file": "src/main/java/com/supplierhub/supplier/supplierb/SupplierBCatalogClient.java",
+        "line": 70,
+        "operator": ".onErrorMap("
+      },
+      {
+        "file": "src/main/java/com/supplierhub/supplier/supplierb/SupplierBSearchClient.java",
+        "line": 81,
+        "operator": ".onErrorMap("
+      },
+      {
+        "file": "src/main/java/com/supplierhub/supplier/supplierb/SupplierBSearchClient.java",
+        "line": 90,
+        "operator": ".onErrorMap("
+      },
+      {
+        "file": "src/main/java/com/supplierhub/supplier/supplierb/SupplierBSearchClient.java",
+        "line": 98,
+        "operator": ".onErrorMap("
+      }
+    ],
+    "imports": {
+      "src/main/java/com/supplierhub/SchedulingConfiguration.java": [
+        "org.springframework.context.annotation.Configuration",
+        "org.springframework.scheduling.annotation.EnableScheduling"
+      ],
+      "src/main/java/com/supplierhub/SupplierHubApplication.java": [
+        "org.springframework.boot.SpringApplication",
+        "org.springframework.boot.autoconfigure.SpringBootApplication"
+      ],
+      "src/main/java/com/supplierhub/catalog/application/ActiveCatalogMapping.java": [
+        "com.supplierhub.catalog.domain.Supplier"
+      ],
+      "src/main/java/com/supplierhub/catalog/application/ActiveCatalogMappingReader.java": [
+        "java.util.List"
+      ],
+      "src/main/java/com/supplierhub/catalog/application/CatalogSnapshotRejectedException.java": [],
+      "src/main/java/com/supplierhub/catalog/application/CatalogSnapshotStore.java": [
+        "com.supplierhub.catalog.domain.CatalogSnapshot"
+      ],
+      "src/main/java/com/supplierhub/catalog/application/CatalogSnapshotUpdate.java": [],
+      "src/main/java/com/supplierhub/catalog/application/CatalogSnapshotWriter.java": [
+        "java.util.ArrayList",
+        "java.util.HashMap",
+        "java.util.HashSet",
+        "java.util.List",
+        "java.util.Map",
+        "java.util.Set",
+        "java.util.stream.Collectors",
+        "org.springframework.stereotype.Service",
+        "org.springframework.transaction.annotation.Transactional",
+        "com.supplierhub.catalog.domain.CatalogSnapshot",
+        "com.supplierhub.catalog.domain.CatalogSnapshot.CatalogProperty",
+        "com.supplierhub.catalog.domain.CatalogSnapshot.CatalogRoomType",
+        "com.supplierhub.catalog.domain.Property",
+        "com.supplierhub.catalog.domain.RoomType",
+        "com.supplierhub.catalog.infrastructure.PropertyRepository",
+        "com.supplierhub.catalog.infrastructure.RoomTypeRepository",
+        "com.supplierhub.supplier.common.SupplierIntegrationProperties"
+      ],
+      "src/main/java/com/supplierhub/catalog/application/CatalogSynchronizationScheduler.java": [
+        "org.springframework.boot.autoconfigure.condition.ConditionalOnProperty",
+        "org.springframework.context.annotation.Configuration",
+        "org.springframework.scheduling.annotation.Scheduled"
+      ],
+      "src/main/java/com/supplierhub/catalog/application/CatalogSynchronizationService.java": [
+        "java.time.Duration",
+        "java.util.Comparator",
+        "java.util.List",
+        "org.slf4j.Logger",
+        "org.slf4j.LoggerFactory",
+        "org.springframework.stereotype.Service",
+        "reactor.util.retry.Retry",
+        "com.supplierhub.catalog.domain.CatalogSnapshot",
+        "com.supplierhub.catalog.domain.Supplier",
+        "com.supplierhub.supplier.common.SupplierCatalogClient",
+        "com.supplierhub.supplier.common.SupplierFailureType",
+        "com.supplierhub.supplier.common.SupplierIntegrationException",
+        "com.supplierhub.supplier.common.SupplierIntegrationProperties",
+        "com.supplierhub.supplier.common.SupplierTransportFailureMapper"
+      ],
+      "src/main/java/com/supplierhub/catalog/domain/CatalogSnapshot.java": [
+        "java.util.HashSet",
+        "java.util.List",
+        "java.util.Objects",
+        "java.util.Set"
+      ],
+      "src/main/java/com/supplierhub/catalog/domain/Property.java": [
+        "java.time.Instant",
+        "java.util.Objects",
+        "jakarta.persistence.Column",
+        "jakarta.persistence.Entity",
+        "jakarta.persistence.EnumType",
+        "jakarta.persistence.Enumerated",
+        "jakarta.persistence.GeneratedValue",
+        "jakarta.persistence.GenerationType",
+        "jakarta.persistence.Id",
+        "jakarta.persistence.PrePersist",
+        "jakarta.persistence.PreUpdate",
+        "jakarta.persistence.Table",
+        "jakarta.persistence.UniqueConstraint"
+      ],
+      "src/main/java/com/supplierhub/catalog/domain/RoomType.java": [
+        "java.time.Instant",
+        "java.util.Objects",
+        "jakarta.persistence.Column",
+        "jakarta.persistence.Entity",
+        "jakarta.persistence.FetchType",
+        "jakarta.persistence.ForeignKey",
+        "jakarta.persistence.GeneratedValue",
+        "jakarta.persistence.GenerationType",
+        "jakarta.persistence.Id",
+        "jakarta.persistence.JoinColumn",
+        "jakarta.persistence.ManyToOne",
+        "jakarta.persistence.PrePersist",
+        "jakarta.persistence.PreUpdate",
+        "jakarta.persistence.Table",
+        "jakarta.persistence.UniqueConstraint"
+      ],
+      "src/main/java/com/supplierhub/catalog/domain/Supplier.java": [],
+      "src/main/java/com/supplierhub/catalog/infrastructure/JpaActiveCatalogMappingReader.java": [
+        "java.util.List",
+        "org.springframework.stereotype.Component",
+        "org.springframework.transaction.annotation.Transactional",
+        "com.supplierhub.catalog.application.ActiveCatalogMapping",
+        "com.supplierhub.catalog.application.ActiveCatalogMappingReader"
+      ],
+      "src/main/java/com/supplierhub/catalog/infrastructure/PropertyRepository.java": [
+        "java.util.List",
+        "java.util.Optional",
+        "org.springframework.data.jpa.repository.JpaRepository",
+        "com.supplierhub.catalog.domain.Property",
+        "com.supplierhub.catalog.domain.Supplier"
+      ],
+      "src/main/java/com/supplierhub/catalog/infrastructure/RoomTypeRepository.java": [
+        "java.util.List",
+        "java.util.Optional",
+        "org.springframework.data.jpa.repository.JpaRepository",
+        "org.springframework.data.jpa.repository.Query",
+        "org.springframework.data.repository.query.Param",
+        "com.supplierhub.catalog.application.ActiveCatalogMapping",
+        "com.supplierhub.catalog.domain.RoomType",
+        "com.supplierhub.catalog.domain.Supplier"
+      ],
+      "src/main/java/com/supplierhub/search/api/ApiErrorResponse.java": [
+        "java.util.Objects"
+      ],
+      "src/main/java/com/supplierhub/search/api/InvalidSearchCriteriaException.java": [],
+      "src/main/java/com/supplierhub/search/api/SearchApiExceptionHandler.java": [
+        "org.springframework.http.ResponseEntity",
+        "org.springframework.web.bind.MissingServletRequestParameterException",
+        "org.springframework.web.bind.annotation.ExceptionHandler",
+        "org.springframework.web.bind.annotation.RestControllerAdvice",
+        "org.springframework.web.method.annotation.MethodArgumentTypeMismatchException"
+      ],
+      "src/main/java/com/supplierhub/search/api/StaySearchController.java": [
+        "java.time.LocalDate",
+        "org.springframework.format.annotation.DateTimeFormat",
+        "org.springframework.http.HttpStatus",
+        "org.springframework.http.ResponseEntity",
+        "org.springframework.web.bind.annotation.GetMapping",
+        "org.springframework.web.bind.annotation.RequestMapping",
+        "org.springframework.web.bind.annotation.RequestParam",
+        "org.springframework.web.bind.annotation.RestController",
+        "com.supplierhub.search.application.IntegratedSearchResult",
+        "com.supplierhub.search.application.IntegratedSearchService",
+        "com.supplierhub.search.application.SearchStatus",
+        "com.supplierhub.search.domain.SearchCriteria"
+      ],
+      "src/main/java/com/supplierhub/search/api/StaySearchResponse.java": [
+        "java.time.LocalDate",
+        "java.util.ArrayList",
+        "java.util.LinkedHashMap",
+        "java.util.List",
+        "java.util.Map",
+        "java.util.Objects",
+        "com.supplierhub.catalog.domain.Supplier",
+        "com.supplierhub.search.application.IntegratedSearchResult",
+        "com.supplierhub.search.application.SearchOffer",
+        "com.supplierhub.search.application.SearchStatus",
+        "com.supplierhub.search.application.SupplierSearchOutcome",
+        "com.supplierhub.search.application.SupplierSearchStatus",
+        "com.supplierhub.search.domain.Offer",
+        "com.supplierhub.search.domain.SearchCriteria",
+        "com.supplierhub.supplier.common.SupplierFailureType"
+      ],
+      "src/main/java/com/supplierhub/search/application/IntegratedSearchResult.java": [
+        "java.util.HashSet",
+        "java.util.List",
+        "java.util.Objects",
+        "java.util.Set",
+        "com.supplierhub.catalog.domain.Supplier",
+        "com.supplierhub.search.domain.Offer"
+      ],
+      "src/main/java/com/supplierhub/search/application/IntegratedSearchService.java": [
+        "com.supplierhub.supplier.common.SupplierSearchRequest.MAX_PROPERTY_COUNT",
+        "java.time.Duration",
+        "java.util.ArrayList",
+        "java.util.Comparator",
+        "java.util.EnumMap",
+        "java.util.EnumSet",
+        "java.util.HashMap",
+        "java.util.HashSet",
+        "java.util.LinkedHashMap",
+        "java.util.List",
+        "java.util.Map",
+        "java.util.Objects",
+        "java.util.Set",
+        "org.slf4j.Logger",
+        "org.slf4j.LoggerFactory",
+        "org.springframework.stereotype.Service",
+        "reactor.core.publisher.Flux",
+        "reactor.core.publisher.Mono",
+        "com.supplierhub.catalog.application.ActiveCatalogMapping",
+        "com.supplierhub.catalog.application.ActiveCatalogMappingReader",
+        "com.supplierhub.catalog.domain.Supplier",
+        "com.supplierhub.search.domain.Offer",
+        "com.supplierhub.search.domain.SearchCriteria",
+        "com.supplierhub.supplier.common.SupplierFailureType",
+        "com.supplierhub.supplier.common.SupplierIntegrationException",
+        "com.supplierhub.supplier.common.SupplierIntegrationProperties",
+        "com.supplierhub.supplier.common.SupplierSearchClient",
+        "com.supplierhub.supplier.common.SupplierSearchRequest",
+        "com.supplierhub.supplier.common.SupplierSearchRequest.PropertyMapping",
+        "com.supplierhub.supplier.common.SupplierSearchRequest.RoomTypeMapping",
+        "com.supplierhub.supplier.common.SupplierSearchResult"
+      ],
+      "src/main/java/com/supplierhub/search/application/OfferNormalizationResult.java": [
+        "java.util.List",
+        "java.util.Objects",
+        "com.supplierhub.search.domain.Offer"
+      ],
+      "src/main/java/com/supplierhub/search/application/OfferNormalizer.java": [
+        "java.util.ArrayList",
+        "java.util.List",
+        "java.util.Objects",
+        "java.util.Optional",
+        "java.util.function.Function",
+        "org.slf4j.Logger",
+        "org.slf4j.LoggerFactory",
+        "com.supplierhub.catalog.domain.Supplier",
+        "com.supplierhub.search.domain.Offer",
+        "com.supplierhub.search.domain.OfferCandidate",
+        "com.supplierhub.search.domain.SearchCriteria"
+      ],
+      "src/main/java/com/supplierhub/search/application/SearchOffer.java": [
+        "java.util.Objects",
+        "com.supplierhub.search.domain.Offer"
+      ],
+      "src/main/java/com/supplierhub/search/application/SearchStatus.java": [],
+      "src/main/java/com/supplierhub/search/application/SupplierSearchOutcome.java": [
+        "java.util.List",
+        "java.util.Objects",
+        "com.supplierhub.catalog.domain.Supplier",
+        "com.supplierhub.supplier.common.SupplierFailureType"
+      ],
+      "src/main/java/com/supplierhub/search/application/SupplierSearchStatus.java": [],
+      "src/main/java/com/supplierhub/search/domain/DailyInventory.java": [
+        "java.time.LocalDate",
+        "java.util.Objects"
+      ],
+      "src/main/java/com/supplierhub/search/domain/Money.java": [
+        "java.util.Currency",
+        "java.util.Objects"
+      ],
+      "src/main/java/com/supplierhub/search/domain/NightlyPrice.java": [
+        "java.time.LocalDate",
+        "java.util.Objects"
+      ],
+      "src/main/java/com/supplierhub/search/domain/Offer.java": [
+        "java.util.List",
+        "java.util.Objects",
+        "java.util.Optional",
+        "com.supplierhub.catalog.domain.Supplier"
+      ],
+      "src/main/java/com/supplierhub/search/domain/OfferCandidate.java": [
+        "java.util.List",
+        "java.util.Objects",
+        "com.supplierhub.catalog.domain.Supplier"
+      ],
+      "src/main/java/com/supplierhub/search/domain/Price.java": [
+        "java.time.LocalDate",
+        "java.util.HashSet",
+        "java.util.List",
+        "java.util.Objects",
+        "java.util.Set"
+      ],
+      "src/main/java/com/supplierhub/search/domain/SearchCriteria.java": [
+        "java.time.LocalDate",
+        "java.time.temporal.ChronoUnit",
+        "java.util.Objects",
+        "java.util.stream.Stream"
+      ],
+      "src/main/java/com/supplierhub/search/domain/StayDateCoverage.java": [
+        "java.time.LocalDate",
+        "java.util.HashSet",
+        "java.util.List",
+        "java.util.Set"
+      ],
+      "src/main/java/com/supplierhub/search/domain/StayInventory.java": [
+        "java.time.LocalDate",
+        "java.util.List",
+        "java.util.Objects"
+      ],
+      "src/main/java/com/supplierhub/supplier/common/SupplierCatalogClient.java": [
+        "reactor.core.publisher.Mono",
+        "com.supplierhub.catalog.domain.CatalogSnapshot",
+        "com.supplierhub.catalog.domain.Supplier"
+      ],
+      "src/main/java/com/supplierhub/supplier/common/SupplierClientConfiguration.java": [
+        "java.time.Duration",
+        "io.netty.channel.ChannelOption",
+        "reactor.netty.http.client.HttpClient",
+        "org.springframework.beans.factory.annotation.Qualifier",
+        "org.springframework.boot.context.properties.EnableConfigurationProperties",
+        "org.springframework.context.annotation.Bean",
+        "org.springframework.context.annotation.Configuration",
+        "org.springframework.http.HttpHeaders",
+        "org.springframework.http.client.reactive.ReactorClientHttpConnector",
+        "org.springframework.web.reactive.function.client.WebClient"
+      ],
+      "src/main/java/com/supplierhub/supplier/common/SupplierFailureType.java": [],
+      "src/main/java/com/supplierhub/supplier/common/SupplierHttpFailureMapper.java": [
+        "org.springframework.http.HttpStatusCode",
+        "com.supplierhub.catalog.domain.Supplier"
+      ],
+      "src/main/java/com/supplierhub/supplier/common/SupplierIntegrationException.java": [
+        "com.supplierhub.catalog.domain.Supplier"
+      ],
+      "src/main/java/com/supplierhub/supplier/common/SupplierIntegrationProperties.java": [
+        "java.net.URI",
+        "java.time.Duration",
+        "jakarta.validation.Valid",
+        "jakarta.validation.constraints.AssertTrue",
+        "jakarta.validation.constraints.DecimalMax",
+        "jakarta.validation.constraints.DecimalMin",
+        "jakarta.validation.constraints.NotBlank",
+        "jakarta.validation.constraints.NotNull",
+        "jakarta.validation.constraints.Positive",
+        "jakarta.validation.constraints.PositiveOrZero",
+        "org.springframework.boot.context.properties.ConfigurationProperties",
+        "org.springframework.validation.annotation.Validated",
+        "com.supplierhub.catalog.domain.Supplier"
+      ],
+      "src/main/java/com/supplierhub/supplier/common/SupplierSearchClient.java": [
+        "reactor.core.publisher.Mono",
+        "com.supplierhub.catalog.domain.Supplier"
+      ],
+      "src/main/java/com/supplierhub/supplier/common/SupplierSearchRequest.java": [
+        "java.util.HashSet",
+        "java.util.List",
+        "java.util.Objects",
+        "java.util.Set",
+        "com.supplierhub.catalog.domain.Supplier",
+        "com.supplierhub.search.domain.SearchCriteria"
+      ],
+      "src/main/java/com/supplierhub/supplier/common/SupplierSearchResult.java": [
+        "java.util.List",
+        "java.util.Objects",
+        "com.supplierhub.catalog.domain.Supplier",
+        "com.supplierhub.search.domain.Offer"
+      ],
+      "src/main/java/com/supplierhub/supplier/common/SupplierTransportFailureMapper.java": [
+        "java.net.SocketTimeoutException",
+        "java.util.concurrent.TimeoutException",
+        "io.netty.channel.ConnectTimeoutException",
+        "io.netty.handler.timeout.ReadTimeoutException",
+        "io.netty.handler.timeout.WriteTimeoutException",
+        "org.springframework.web.reactive.function.client.WebClientRequestException",
+        "com.supplierhub.catalog.domain.Supplier"
+      ],
+      "src/main/java/com/supplierhub/supplier/suppliera/SupplierACatalogClient.java": [
+        "java.util.List",
+        "reactor.core.publisher.Mono",
+        "org.springframework.beans.factory.annotation.Qualifier",
+        "org.springframework.core.codec.DecodingException",
+        "org.springframework.http.HttpStatusCode",
+        "org.springframework.stereotype.Component",
+        "org.springframework.web.reactive.function.client.ClientResponse",
+        "org.springframework.web.reactive.function.client.WebClient",
+        "org.springframework.web.reactive.function.client.WebClientRequestException",
+        "com.supplierhub.catalog.domain.CatalogSnapshot",
+        "com.supplierhub.catalog.domain.CatalogSnapshot.CatalogProperty",
+        "com.supplierhub.catalog.domain.CatalogSnapshot.CatalogRoomType",
+        "com.supplierhub.catalog.domain.Supplier",
+        "com.supplierhub.supplier.common.SupplierCatalogClient",
+        "com.supplierhub.supplier.common.SupplierFailureType",
+        "com.supplierhub.supplier.common.SupplierHttpFailureMapper",
+        "com.supplierhub.supplier.common.SupplierIntegrationException",
+        "com.supplierhub.supplier.common.SupplierTransportFailureMapper"
+      ],
+      "src/main/java/com/supplierhub/supplier/suppliera/SupplierASearchClient.java": [
+        "java.time.LocalDate",
+        "java.util.HashMap",
+        "java.util.List",
+        "java.util.Map",
+        "java.util.Objects",
+        "java.util.stream.Collectors",
+        "reactor.core.publisher.Mono",
+        "org.springframework.beans.factory.annotation.Qualifier",
+        "org.springframework.core.codec.DecodingException",
+        "org.springframework.http.HttpStatusCode",
+        "org.springframework.stereotype.Component",
+        "org.springframework.web.reactive.function.client.ClientResponse",
+        "org.springframework.web.reactive.function.client.WebClient",
+        "org.springframework.web.reactive.function.client.WebClientRequestException",
+        "com.supplierhub.catalog.domain.Supplier",
+        "com.supplierhub.search.application.OfferNormalizationResult",
+        "com.supplierhub.search.application.OfferNormalizer",
+        "com.supplierhub.search.domain.DailyInventory",
+        "com.supplierhub.search.domain.Money",
+        "com.supplierhub.search.domain.NightlyPrice",
+        "com.supplierhub.search.domain.OfferCandidate",
+        "com.supplierhub.search.domain.Price",
+        "com.supplierhub.supplier.common.SupplierFailureType",
+        "com.supplierhub.supplier.common.SupplierHttpFailureMapper",
+        "com.supplierhub.supplier.common.SupplierIntegrationException",
+        "com.supplierhub.supplier.common.SupplierIntegrationProperties",
+        "com.supplierhub.supplier.common.SupplierSearchClient",
+        "com.supplierhub.supplier.common.SupplierSearchRequest",
+        "com.supplierhub.supplier.common.SupplierSearchRequest.PropertyMapping",
+        "com.supplierhub.supplier.common.SupplierSearchResult",
+        "com.supplierhub.supplier.common.SupplierTransportFailureMapper"
+      ],
+      "src/main/java/com/supplierhub/supplier/supplierb/SupplierBCatalogClient.java": [
+        "java.util.List",
+        "reactor.core.publisher.Mono",
+        "org.springframework.beans.factory.annotation.Qualifier",
+        "org.springframework.core.codec.DecodingException",
+        "org.springframework.http.HttpStatusCode",
+        "org.springframework.stereotype.Component",
+        "org.springframework.web.reactive.function.client.ClientResponse",
+        "org.springframework.web.reactive.function.client.WebClient",
+        "org.springframework.web.reactive.function.client.WebClientRequestException",
+        "com.supplierhub.catalog.domain.CatalogSnapshot",
+        "com.supplierhub.catalog.domain.CatalogSnapshot.CatalogProperty",
+        "com.supplierhub.catalog.domain.CatalogSnapshot.CatalogRoomType",
+        "com.supplierhub.catalog.domain.Supplier",
+        "com.supplierhub.supplier.common.SupplierCatalogClient",
+        "com.supplierhub.supplier.common.SupplierFailureType",
+        "com.supplierhub.supplier.common.SupplierHttpFailureMapper",
+        "com.supplierhub.supplier.common.SupplierIntegrationException",
+        "com.supplierhub.supplier.common.SupplierTransportFailureMapper"
+      ],
+      "src/main/java/com/supplierhub/supplier/supplierb/SupplierBSearchClient.java": [
+        "java.time.LocalDate",
+        "java.util.HashMap",
+        "java.util.List",
+        "java.util.Map",
+        "java.util.Objects",
+        "java.util.stream.Collectors",
+        "reactor.core.publisher.Mono",
+        "org.springframework.beans.factory.annotation.Qualifier",
+        "org.springframework.core.codec.DecodingException",
+        "org.springframework.http.HttpStatusCode",
+        "org.springframework.stereotype.Component",
+        "org.springframework.web.reactive.function.client.ClientResponse",
+        "org.springframework.web.reactive.function.client.WebClient",
+        "org.springframework.web.reactive.function.client.WebClientRequestException",
+        "com.supplierhub.catalog.domain.Supplier",
+        "com.supplierhub.search.application.OfferNormalizationResult",
+        "com.supplierhub.search.application.OfferNormalizer",
+        "com.supplierhub.search.domain.DailyInventory",
+        "com.supplierhub.search.domain.Money",
+        "com.supplierhub.search.domain.OfferCandidate",
+        "com.supplierhub.search.domain.Price",
+        "com.supplierhub.supplier.common.SupplierFailureType",
+        "com.supplierhub.supplier.common.SupplierHttpFailureMapper",
+        "com.supplierhub.supplier.common.SupplierIntegrationException",
+        "com.supplierhub.supplier.common.SupplierIntegrationProperties",
+        "com.supplierhub.supplier.common.SupplierSearchClient",
+        "com.supplierhub.supplier.common.SupplierSearchRequest",
+        "com.supplierhub.supplier.common.SupplierSearchRequest.PropertyMapping",
+        "com.supplierhub.supplier.common.SupplierSearchResult",
+        "com.supplierhub.supplier.common.SupplierTransportFailureMapper"
+      ]
+    }
+  },
+  "findings": {
+    "catalogMissingClient": "A enabled but only B registered: no startup exception; B stored once",
+    "catalogDuplicateClient": "A registered twice: two replace calls within one synchronization",
+    "catalogMismatch": "A client returns B snapshot while B disabled: B passed to store",
+    "internalSearchBug": "IllegalStateException from A client => PARTIAL, UNKNOWN; one valid B offer retained",
+    "normalizerBug": "NPE => rejected item; IllegalStateException => propagated",
+    "api500": "Default JSON status=500, no code field, injected private message absent"
+  },
+  "probeSources": [
+    {
+      "relativeToScratch": "src/com/supplierhub/audit/StructureApiProbeTests.java",
+      "sha256": "727e3effd298c221e4b04ab3dd70837d117ca4a7d2a337b9395b27c8dd411940",
+      "text": "package com.supplierhub.audit;\nimport static org.assertj.core.api.Assertions.*;\nimport static org.mockito.Mockito.*;\nimport java.net.URI;\nimport java.net.http.*;\nimport org.junit.jupiter.api.Test;\nimport org.springframework.boot.test.context.SpringBootTest;\nimport org.springframework.boot.test.web.server.LocalServerPort;\nimport org.springframework.boot.testcontainers.service.connection.ServiceConnection;\nimport org.springframework.test.context.bean.override.mockito.MockitoBean;\nimport org.testcontainers.junit.jupiter.Container;\nimport org.testcontainers.postgresql.PostgreSQLContainer;\nimport com.supplierhub.search.application.IntegratedSearchService;\n\n@SpringBootTest(webEnvironment=SpringBootTest.WebEnvironment.RANDOM_PORT,properties=\"supplier.catalog.enabled=false\")\nclass StructureApiProbeTests {\n    @Container @ServiceConnection static final PostgreSQLContainer postgres=new PostgreSQLContainer(\"postgres:17-alpine\");\n    @LocalServerPort int port;\n    @MockitoBean IntegratedSearchService search;\n    @Test void unexpectedFailureReturnsDefault500WithoutLeakingInternalMessage() throws Exception {\n        when(search.search(any())).thenThrow(new IllegalStateException(\"audit-private-error\"));\n        var request=HttpRequest.newBuilder(URI.create(\"http://127.0.0.1:\"+port+\"/api/v1/stays/search?checkIn=2026-10-01&checkOut=2026-10-02&adults=2\")).header(\"Accept\",\"application/json\").GET().build();\n        var response=HttpClient.newHttpClient().send(request,HttpResponse.BodyHandlers.ofString());\n        assertThat(response.statusCode()).isEqualTo(500);\n        assertThat(response.body()).contains(\"\\\"status\\\":500\").doesNotContain(\"audit-private-error\").doesNotContain(\"\\\"code\\\":\");\n        System.out.println(\"STRUCTAUDIT unexpectedApiError: status=500 body=\"+response.body());\n    }\n}\n"
+    },
+    {
+      "relativeToScratch": "src/com/supplierhub/audit/StructureBoundaryProbeTests.java",
+      "sha256": "d921e0c16b52074464ef6cb2b53d0ffe678e24ec95b3564e87dcb1a2ff6c55d3",
+      "text": "package com.supplierhub.audit;\n\nimport static org.assertj.core.api.Assertions.*;\nimport java.net.URI;\nimport java.time.*;\nimport java.util.*;\nimport org.junit.jupiter.api.Test;\nimport reactor.core.publisher.Mono;\nimport com.supplierhub.catalog.application.*;\nimport com.supplierhub.catalog.domain.*;\nimport com.supplierhub.search.application.*;\nimport com.supplierhub.search.domain.*;\nimport com.supplierhub.supplier.common.*;\n\nclass StructureBoundaryProbeTests {\n    static final Supplier A=Supplier.SUPPLIER_A,B=Supplier.SUPPLIER_B;\n    static final SearchCriteria criteria=new SearchCriteria(LocalDate.of(2026,10,1),LocalDate.of(2026,10,2),2,0);\n    SupplierIntegrationProperties properties(boolean enabledB) {\n        return new SupplierIntegrationProperties(\n            new SupplierIntegrationProperties.Endpoint(true,URI.create(\"http://localhost\"),\"test\"),\n            new SupplierIntegrationProperties.Endpoint(enabledB,URI.create(\"http://localhost\"),\"test\"),\n            new SupplierIntegrationProperties.Catalog(true,Duration.ofMillis(100),Duration.ofSeconds(1),Duration.ofSeconds(2),0,Duration.ofMillis(1),Duration.ZERO,Duration.ofMinutes(10),10,0.5),\n            new SupplierIntegrationProperties.Search(Duration.ofMillis(100),Duration.ofSeconds(1),Duration.ofSeconds(2),Duration.ofSeconds(5),4));\n    }\n    SupplierCatalogClient catalog(Supplier declared,Supplier returned) {\n        return new SupplierCatalogClient(){\n            public Supplier supplier(){return declared;}\n            public Mono<CatalogSnapshot> fetchCatalog(){return Mono.just(new CatalogSnapshot(returned,List.of()));}\n        };\n    }\n    CatalogSnapshotStore store(List<Supplier> stored) {\n        return snapshot->{stored.add(snapshot.supplier());return new CatalogSnapshotUpdate(0,0,0,0,0,0,0,0,0,0);};\n    }\n    @Test void enabledCatalogClientCanBeMissingWithoutStartupFailure() {\n        var stored=new ArrayList<Supplier>();\n        var service=new CatalogSynchronizationService(List.of(catalog(B,B)),store(stored),properties(true));\n        service.synchronizeAll();\n        assertThat(stored).containsExactly(B);\n        System.out.println(\"STRUCTAUDIT missingEnabledCatalogClient: enabledA=true registeredBOnly=true stored=[B] noException=true\");\n    }\n    @Test void duplicateCatalogClientsAreBothAppliedInOneRun() {\n        var stored=new ArrayList<Supplier>();\n        new CatalogSynchronizationService(List.of(catalog(A,A),catalog(A,A)),store(stored),properties(false)).synchronizeAll();\n        assertThat(stored).containsExactly(A,A);\n        System.out.println(\"STRUCTAUDIT duplicateCatalog: supplier=A storeCalls=2 synchronizationRuns=1\");\n    }\n    @Test void catalogSnapshotSupplierMismatchReachesStoreEvenWhenDisabled() {\n        var stored=new ArrayList<Supplier>();\n        new CatalogSynchronizationService(List.of(catalog(A,B)),store(stored),properties(false)).synchronizeAll();\n        assertThat(stored).containsExactly(B);\n        System.out.println(\"STRUCTAUDIT catalogMismatch: declared=A returned=B enabledB=false stored=[B]\");\n    }\n    @Test void unexpectedSearchAdapterBugBecomesUnknownPartial() {\n        SupplierSearchClient bad=new SupplierSearchClient(){\n            public Supplier supplier(){return A;}\n            public Mono<SupplierSearchResult> search(SupplierSearchRequest request){throw new IllegalStateException(\"audit adapter bug\");}\n        };\n        SupplierSearchClient good=new SupplierSearchClient(){\n            public Supplier supplier(){return B;}\n            public Mono<SupplierSearchResult> search(SupplierSearchRequest request){\n                var offer=Offer.createAvailable(2,201,B,2,false,Price.totalOnly(Money.of(\"KRW\",1000)),criteria,List.of(new DailyInventory(criteria.checkIn(),2))).orElseThrow();\n                return Mono.just(new SupplierSearchResult(B,List.of(offer),0,0));\n            }\n        };\n        var rows=List.of(new ActiveCatalogMapping(1,A,\"P1\",\"One\",101,\"R1\",\"Room\"),new ActiveCatalogMapping(2,B,\"P2\",\"Two\",201,\"R2\",\"Room\"));\n        var result=new IntegratedSearchService(()->rows,List.of(bad,good),properties(true)).search(criteria);\n        assertThat(result.status()).isEqualTo(SearchStatus.PARTIAL);\n        assertThat(result.supplierResults().getFirst().failureTypes()).containsExactly(SupplierFailureType.UNKNOWN);\n        assertThat(result.offers()).hasSize(1);\n        System.out.println(\"STRUCTAUDIT adapterBug: thrown=IllegalStateException status=PARTIAL failedA=UNKNOWN validBOffers=1\");\n    }\n    @Test void mapperNpeBecomesItemRejectionButIllegalStateEscapes() {\n        var rejected=OfferNormalizer.normalize(criteria,A,List.of(\"valid item\"),x->{throw new NullPointerException(\"audit mapper bug\");});\n        assertThat(rejected.rejectedOfferCount()).isEqualTo(1);\n        assertThat(rejected.offers()).isEmpty();\n        assertThatThrownBy(()->OfferNormalizer.normalize(criteria,A,List.of(\"valid item\"),x->{throw new IllegalStateException(\"audit mapper bug\");})).isInstanceOf(IllegalStateException.class);\n        System.out.println(\"STRUCTAUDIT mapperBug: NPE=rejectedItem IllegalStateException=propagated\");\n    }\n}\n"
+    },
+    {
+      "relativeToScratch": "audit.init.gradle",
+      "text": "allprojects { p ->\n    if (p == p.rootProject) {\n        p.plugins.withId('java') {\n            p.sourceSets.test.java.srcDir('/private/tmp/supplier-hub-structure-review/src')\n            p.tasks.named('test') {\n                reports.junitXml.outputLocation = p.layout.buildDirectory.dir('structure-review-results')\n                reports.html.outputLocation = p.layout.buildDirectory.dir('structure-review-report')\n                testLogging { showStandardStreams = true; events 'passed', 'failed' }\n            }\n        }\n    }\n}\n",
+      "sha256": "eaa40b7e73acf846e56f27932286feec1b90bc1751cde998c82a2a99a65cc393"
+    }
+  ],
+  "reproduction": {
+    "restoreUnder": "/private/tmp/supplier-hub-structure-review",
+    "gradleCommand": "./gradlew -I /private/tmp/supplier-hub-structure-review/audit.init.gradle :test --tests \"*StructureBoundaryProbeTests\" --tests \"*StructureApiProbeTests\" --console=plain",
+    "requirements": [
+      "Java 21",
+      "Docker for isolated PostgreSQL Testcontainers",
+      "Run Gradle from project root",
+      "Restore source texts preserving relative paths under restoreUnder"
+    ],
+    "note": "Audit probes assert current behavior. They are not fixes or permanent regression tests."
+  },
+  "officialReferences": [
+    "https://java.testcontainers.org/features/reuse/",
+    "https://java.testcontainers.org/test_framework_integration/junit_5/"
+  ]
+}
