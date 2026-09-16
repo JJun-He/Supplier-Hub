@@ -160,6 +160,7 @@ curl -s http://localhost:8080/actuator/metrics/supplier.catalog.consecutive.fail
 
 ## 문서 안내
 
+- [AI 활용과 검증 기록](AI_USAGE.md)
 - [구현 계획과 진행 상태](docs/implementation-plan.md)
 - [전체 연결 E2E 검증](docs/e2e-verification.md)
 - [정확성 감사](docs/correctness-audit.md)
