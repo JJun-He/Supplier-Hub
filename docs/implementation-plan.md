@@ -419,7 +419,7 @@ docs: 실행 방법과 설계 근거 정리
 
 - [x] **8-A 정확성·입력/예외 계약:** 엄격 숫자·항목별 격리, 완전 중복 제거·수용 인원 충돌 거부, 특수 코드 보존, 카탈로그 client/snapshot 검사, B 오류 표 통합, 내부 오류 분류. 결정과 테스트 위치는 [설계 §16](architecture-decisions.md#16-8-a-입력중복예외-계약-보완).
 - [x] **8-B 자원 제한·관측성:** Supplier/작업별 JVM 호출 한도와 분리한 연결 풀, 유한한 응답 크기·전용 실패 분류, 취소 후 회복, 중복·업무 실패·카탈로그 신선도 지표. 메인 232개·Mock 6개 성공. [설계 §17](architecture-decisions.md#17-8-b-자원-제한과-업무-지표).
-- [x] **8-C DB:** 단일 동기화 인스턴스·Supplier별 전체 실행 guard, 검색 DB 절대 deadline·transaction-local timeout·유한한 연결 대기, 쓰기 별도 예산과 실제 commit/rollback 검증. [설계 §18](architecture-decisions.md#18-8-c-동기화-중복-실행과-db-시간-예산).
+- [x] **8-C DB:** 단일 갱신 인스턴스 정책 명시·추가 서비스 호출을 위한 guard, 검색 DB 절대 deadline·transaction-local timeout·유한한 연결 대기, 쓰기 별도 예산과 실제 commit/rollback 검증. 현재 운영 동기화의 직렬화는 기존 fixedDelay가 제공한다. [설계 §18](architecture-decisions.md#18-8-c-동기화-중복-실행과-db-시간-예산).
 - [ ] **8-D 전체 연결 검증:** 실제 DB·Mock·고객 API의 정상·부분·전체 실패 및 timeout.
 - [ ] **9단계:** 실행 명령 재검증, 최종 설계·한계 정리, 요구사항→구현→테스트→문서 대조.
 

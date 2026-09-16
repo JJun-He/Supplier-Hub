@@ -705,9 +705,11 @@ Actuator HTTP 노출은 `health`, `info`, `metrics`다. 대시보드·외부 tra
 
 ### 18.1 지원하는 실행 범위
 
-카탈로그를 갱신하는 애플리케이션 인스턴스는 하나로 제한한다. 여러 서버를 띄운다면 나머지는 `SUPPLIER_CATALOG_ENABLED=false`로 스케줄을 끄고 수동 동기화도 실행하지 않아야 한다. 자동 leader 선출이나 분산 lock은 구현하지 않았다.
+카탈로그를 갱신하는 애플리케이션 인스턴스는 하나로 제한한다. 현재 운영 호출처는 `CatalogSynchronizationScheduler`의 동기 `fixedDelay` 메서드 하나이며, 수동 트리거 endpoint나 관리자 실행 경로는 없다. 이전 실행이 끝난 뒤 다음 실행까지의 지연을 계산하므로 이 경로의 직렬화는 8-C 이전부터 스케줄러가 제공한다. 여러 서버에서는 나머지 서버의 스케줄을 `SUPPLIER_CATALOG_ENABLED=false`로 끄고, 추가 호출 경로를 만들 때도 갱신 인스턴스 하나라는 제약을 지켜야 한다. 자동 leader 선출이나 분산 lock은 구현하지 않았다. [Spring fixedDelay](https://docs.spring.io/spring-framework/reference/integration/scheduling.html)
 
-한 인스턴스의 `CatalogSynchronizationService`는 Supplier별 원자적 guard를 HTTP 조회 전에 획득한다. 모든 HTTP 시도와 retry backoff, snapshot 저장의 commit/rollback이 끝날 때까지 유지하며 `finally`에서 반환한다. 같은 Supplier의 중복 실행은 대기하거나 새 snapshot을 가져오지 않고 건너뛰며 다음 Supplier를 진행한다. 이 범위에서 최초 INSERT 경쟁, 누락 횟수 lost update, 먼저 가져온 snapshot의 나중 저장을 예방한다. Supplier가 직렬 요청에 오래된 데이터를 돌려주는 문제까지 판별하는 version 계약은 없다.
+`CatalogSynchronizationService`의 Supplier별 guard는 향후 추가 트리거나 서비스 직접 호출이 겹칠 때의 보조 방어다. 현재 단일 스케줄 경로에서는 중복 실행을 건너뛰는 분기가 발생하지 않는다. guard는 HTTP 조회 전에 획득해 모든 HTTP 시도와 retry backoff, snapshot 저장의 commit/rollback 이후까지 유지하고 `finally`에서 반환한다. 같은 Supplier의 추가 호출은 대기하거나 새 snapshot을 가져오지 않고 건너뛰며 다음 Supplier를 진행한다.
+
+DB 감사에서 재현한 최초 INSERT 경쟁, 누락 횟수 lost update, snapshot 저장 순서 역전의 발생 조건은 현재 지원 범위에서 단일 갱신 인스턴스 정책과 기존 `fixedDelay` 직렬화로 배제한다. 이를 guard가 운영 중 발생하던 DB 경쟁이나 다중 인스턴스 경쟁을 해결한 것으로 해석하지 않는다. Supplier가 직렬 요청에 오래된 데이터를 돌려주는 문제를 판별하는 version 계약도 없다.
 
 서비스 진입은 `Propagation.NEVER`로 외부 트랜잭션 안의 실행을 거부한다. 따라서 HTTP 중에는 DB 트랜잭션을 유지하지 않고, writer의 프록시가 독립 트랜잭션을 끝낸 뒤 guard를 해제한다. `CatalogSnapshotWriter` 직접 호출은 동기화 진입 API가 아니며 guard를 제공하지 않는다.
 
@@ -720,25 +722,39 @@ Actuator HTTP 노출은 `health`, `info`, `metrics`다. 대시보드·외부 tra
 | Hikari maximum-pool-size | 10 | 검색·쓰기의 공유 DB 연결 수 |
 | Hikari connection-timeout / validation-timeout | 500ms / 250ms | 연결 획득·유효성 검사 |
 | pgJDBC connectTimeout / socketTimeout | 2초 / 15초 | 연결 수립·각 socket 읽기 |
-| PostgreSQL session statement_timeout / lock_timeout | 10초 / 2초 | 쓰기 등 기본 SQL / 잠금 대기 |
+| PostgreSQL session statement_timeout / lock_timeout | 10초 / 2초 | 공유 DataSource의 기본 SQL / 잠금 대기. 운영 Flyway 포함 |
 | catalog.database.read-statement-timeout | 1초 | 검색 projection SQL |
 | catalog.database.read-lock-timeout | 300ms | 검색 SQL의 잠금 대기 |
 | catalog.database.write-transaction-timeout-seconds | 10초 | Spring/Hibernate 쓰기 트랜잭션 |
 
 검색 시작의 `System.nanoTime()`으로 만든 절대 deadline을 조회 포트에 전달한다. reader는 독립된 `readOnly` 트랜잭션에서 연결을 확보한 뒤 남은 시간을 계산한다. PostgreSQL `set_config(..., true)`로 statement timeout은 `min(읽기 한도, 잔여 시간)`, lock timeout은 `min(잠금 한도, statement 한도)`로 설정한다. 예산이 소진되면 SQL을 실행하지 않고, 양수의 1ms 미만 시간은 1ms로 올려 timeout이 0으로 비활성화되지 않게 한다. 조회와 트랜잭션 종료 뒤에도 deadline을 확인한다. `JdbcTemplate`은 JPA와 같은 DataSource/트랜잭션 연결을 사용한다. [Spring JpaTransactionManager](https://docs.spring.io/spring-framework/docs/current/javadoc-api/org/springframework/orm/jpa/JpaTransactionManager.html)
 
+정상적으로 조회를 완료하는 검색은 **timeout 설정 SELECT 1개 + 데이터 projection SELECT 1개**를 실행한다. 8-C 이전보다 설정문과 왕복 1회가 추가됐으며, 이는 BEGIN/COMMIT 등 트랜잭션 제어를 제외한 SQL 개수다. 숙소 수에 비례해 SQL이 늘어나는 N+1은 없다. 설정문은 직접 JDBC로 실행하므로 Hibernate 통계만으로 전체 statement 수를 세지 않는다. DB 감사의 0.196ms는 네트워크·JPA 처리를 제외한 EXPLAIN 서버 실행 시간이어서 추가 왕복의 비용 비율을 계산할 근거가 아니다. 변경 전후 DB 구간 지연은 별도로 측정하지 않았다.
+
+추가 왕복은 요청마다 연결 획득에 사용한 시간을 빼고 남은 예산을 ms 단위의 SQL·잠금 제한에 반영하기 위한 비용이다. 연결 초기화 시 고정 한도를 설정하는 대안은 이 왕복을 줄일 수 있지만 요청별 잔여 시간을 그대로 반영하지 못한다. 현재는 동일 연결의 transaction-local 설정과 종료 시 복원을 선택했다.
+
 검색용 설정은 트랜잭션이 끝나면 원래 session 값으로 돌아간다. 쓰기는 검색의 짧은 timeout을 물려받지 않으며 별도의 Spring 트랜잭션 timeout과 유한한 PostgreSQL 기본 한도를 사용한다. statement timeout은 각 SQL의 제한이므로 전체 저장 시간과 같은 의미가 아니다. [PostgreSQL timeout](https://www.postgresql.org/docs/17/runtime-config-client.html)
 
+운영 Flyway에는 별도 DataSource/연결 설정이 없으므로 같은 DataSource의 session 기본 한도가 적용된다. migration SQL이 10초를 넘거나 잠금 획득을 2초 넘게 기다리면 취소되어 애플리케이션 기동이 실패할 수 있다. `ACCESS EXCLUSIVE` 잠금 자체가 실패 조건은 아니다. 현재 migration은 작지만, 장시간 DDL·백필 도입 전에는 migration 전용 연결과 별도 timeout 예산을 구성·검증해야 한다. 이 변경에서는 DataSource를 분리하지 않았다. Testcontainers의 `@ServiceConnection`은 Flyway 전용 연결 정보를 제공할 수 있으므로 기존 전체 테스트 통과를 운영 migration의 동일 DataSource timeout 검증으로 간주하지 않는다. [Spring Boot Flyway DataSource](https://docs.spring.io/spring-boot/how-to/data-initialization.html)
+
+reader는 `REQUIRES_NEW`로 조회 트랜잭션과 설정 복원 경계를 자체 소유한다. 현재 고객 검색은 외부 트랜잭션 없이 진입한다. 외부 트랜잭션이 이미 연결을 확보한 상태에서 검색을 호출하면 그 연결을 유지한 채 reader가 두 번째 연결을 요구하므로 동시 호출에서 풀 고갈이 발생할 수 있다. 검색 진입에는 이를 거부하는 `NEVER` 검사가 없고, 중첩 동작은 별도 통합 검증하지 않았다. 검색 경로를 트랜잭션으로 감싸는 변경은 이 연결 점유와 Supplier HTTP 대기 중 외부 트랜잭션 유지를 함께 검토해야 한다. [Spring REQUIRES_NEW](https://docs.spring.io/spring-framework/reference/data-access/transaction/declarative/tx-propagation.html)
+
 이 값은 부하 실측으로 정한 처리 용량이 아니다. Hikari의 고정 획득 대기는 요청별로 줄일 수 없고 최소값도 250ms다. 매우 짧은 검색 예산에서는 연결 대기만으로 deadline을 넘길 수 있다. 설정 SQL 자체와 통신 장애는 별도 JDBC 한도에 의존하고, socketTimeout도 전체 요청 상한이 아니다. CPU 매핑·응답 조립·직렬화까지 포함한 5초 hard deadline을 보장한다고 표현하지 않는다. [HikariCP 설정](https://github.com/brettwooldridge/HikariCP#configuration-knobs-baby), [pgJDBC 설정](https://jdbc.postgresql.org/documentation/use/)
+
+Hikari의 10개는 실제 DB 연결의 상한이며 별도의 고객 요청 진입 제한이나 연결 대기자 수 제한은 아니다. 기본 Tomcat 작업 스레드도 최대 200개로 유한하다(virtual threads 비활성). DB 연결은 정상 검색에서 Supplier HTTP 호출 전에 반환되므로 DB 10개와 Supplier 검색 8+8개를 숫자만 비교해 병목을 판정하지 않는다. 점유 시간·배치 수·동시 요청 수를 함께 측정해야 한다. [Spring Boot 4.0 기본 설정](https://docs.spring.io/spring-boot/4.0/appendix/application-properties/index.html)
 
 ### 18.3 실패와 고객 응답
 
 reader는 트랜잭션 시작·조회·종료 전체 바깥에서 예상된 자원 실패만 `CatalogReadException`으로 변환한다. SQL timeout/취소, lock timeout, deadline 소진은 TIMEOUT이고 연결 확보 실패·연결 단절은 UNAVAILABLE이다. SQL 문법·무결성·미분류 프로그래밍 오류는 내부 오류로 남긴다. PostgreSQL SQLState로 판별하며 메시지 문자열에 의존하지 않는다.
 
-이 두 예상 실패에는 Supplier HTTP를 시작하지 않고 모든 활성 Supplier에 `CATALOG_UNAVAILABLE`을 기록하여 기존 HTTP 503 / FAILED 계약을 사용한다. 고객 응답에는 DB 메시지나 SQL을 넣지 않는다. `search.catalog.read.failures{reason=TIMEOUT|UNAVAILABLE}`로 원인을 구분하고 검색 전체 FAILED·DATABASE 구간 시간·Supplier 실패 지표도 기록한다. HTTP 응답 enum은 추가하지 않았다.
+이 두 예상 실패에는 Supplier HTTP를 시작하지 않고 모든 활성 Supplier에 `CATALOG_UNAVAILABLE`을 기록하여 기존 HTTP 503 / FAILED 계약을 사용한다. 이 코드는 해당 Supplier 검색에 필요한 카탈로그를 사용할 수 없다는 뜻이며, Supplier 서버 자체의 장애를 단정하지 않는다. 고객은 이 코드만으로 활성 매핑 미확보, 정상 빈 카탈로그, 우리 DB의 읽기 실패를 구분할 수 없다. 정상 빈 카탈로그와 동기화 미완료를 구별하는 영속 상태가 없어 매핑 조회 결과만으로 두 상태를 구분하지 못하는 기존 절충도 유지한다. Supplier 검색 API가 반환한 정상 빈 결과는 성공으로 처리한다.
+
+현재 공개 응답은 검색 가능 여부를 전달하고, DB 실패의 상세 원인은 로그와 `search.catalog.read.failures{reason=TIMEOUT|UNAVAILABLE}`에서 구분한다. 검색 전체 FAILED·DATABASE 구간 시간·Supplier 실패 지표도 기록한다. 모든 Supplier가 CATALOG_UNAVAILABLE인 응답만으로 여러 Supplier의 동시 장애라고 판단하지 않고 DB 읽기 지표와 로그를 먼저 확인한다. 고객 응답에는 DB 메시지나 SQL을 넣지 않는다. 이는 공개 오류의 상세 수준을 선택한 절충이며 enum 추가를 금지하는 원칙은 아니다. 공개 API에서 원인별 처리가 필요해지면 별도 읽기 실패 코드를 검토한다.
+
+현재 계층 경계는 검색 application이 조회 포트에 같은 JVM의 단조시계 deadline을 전달하고 `CatalogReadException`을 처리하는 형태다. JPA/JDBC 트랜잭션·PostgreSQL timeout·SQLState 분류는 인프라 어댑터가 담당한다. 포트의 `long`은 epoch 시각이나 남은 Duration이 아니며, 기준·단위·만료 동작을 Javadoc에 명시한다. 구체 호출 자원·지표 구현에 대한 application의 결합은 §17.1의 절충으로 유지한다.
 
 ### 18.4 검증과 남은 범위
 
-실제 PostgreSQL에서 조회 잠금·느린 SQL·연결 부족과 실패 후 회복, 트랜잭션 범위의 timeout 설정 복원을 검증한다. 독립 commit 이후 누락·비활성·재등장에서 ID를 유지하고, 실제 중간 쓰기 실패의 rollback과 Supplier별 독립 반영을 확인한다. 동기화 guard는 조회·retry backoff·저장 대기 중 중복 호출과 실패 후 반환을 검증한다. 구체 테스트와 최종 실행 결과는 JOURNAL에 남긴다.
+실제 PostgreSQL에서 조회 잠금·느린 SQL·연결 부족과 실패 후 회복, 트랜잭션 범위의 timeout 설정 복원을 검증한다. 독립 commit 이후 누락·비활성·재등장에서 ID를 유지하고, 실제 중간 쓰기 실패의 rollback과 Supplier별 독립 반영을 확인한다. `CatalogSynchronizationConcurrencyTests`는 추가 스레드에서 서비스를 직접 호출해 조회·retry backoff·저장 대기 중 중복 거부와 실패 후 반환 계약을 검증한다. 현재 운영 스케줄에서 중복 실행이 발생한다는 재현 테스트는 아니다. 구체 테스트와 최종 실행 결과는 JOURNAL에 남긴다.
 
-기존 단일 projection과 인덱스를 유지한다. DB 감사에서 확인한 query 수에 근거해 N+1 수정이나 근거 없는 인덱스·batch/upsert 전환을 추가하지 않았다. 다중 동기화 인스턴스, 고객 검색 진입 제한, 데이터 버전, 생산 환경 부하 시험은 별도 확장 범위다. DB·별도 Mock·고객 HTTP 전체 연결은 8-D에서 검증한다.
+데이터 조회용 단일 projection과 인덱스를 유지하며, 앞서 설명한 설정 SQL 1개가 추가된다. DB 감사의 N+1 부재 결론에 따라 N+1 수정이나 근거 없는 인덱스·batch/upsert 전환을 추가하지 않았다. 다중 동기화 인스턴스, 고객 검색 진입 제한, 데이터 버전, 생산 환경 부하 시험은 별도 확장 범위다. DB·별도 Mock·고객 HTTP 전체 연결은 8-D에서 검증한다.

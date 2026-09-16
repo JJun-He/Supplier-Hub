@@ -136,7 +136,11 @@ docker compose down
 
 요청당 Supplier 동시 호출은 4개이며, JVM 전체에서 Supplier별 검색 8개·카탈로그 1개로 추가 제한합니다. 한도를 넘으면 대기열 없이 `CAPACITY_EXCEEDED`로 분류하고 정상 Supplier 결과는 유지합니다. 응답 한도는 검색 2 MiB·카탈로그 8 MiB이며 초과하면 `RESPONSE_TOO_LARGE`입니다. 설정과 검증 범위는 [설계 §17](docs/architecture-decisions.md#17-8-b-자원-제한과-업무-지표)을 참고하세요. 감사 보고서의 본문은 감사 시점 기록이며, 수정 상태는 각 문서 상단 안내와 구현 진행표로 구분합니다.
 
-카탈로그 동기화는 한 인스턴스에서 실행하며, 같은 Supplier의 조회·재시도·저장이 진행 중이면 중복 실행을 건너뜁니다. 여러 서버에서는 나머지 서버의 스케줄을 `SUPPLIER_CATALOG_ENABLED=false`로 끄고 수동 동기화도 실행하지 않아야 합니다. 검색 DB 조회는 남은 요청 예산과 기본 1초 SQL·300ms 잠금 한도를 적용하고, 연결 획득은 기본 500ms로 제한합니다. DB 자원 실패는 Supplier 호출 없이 `CATALOG_UNAVAILABLE` / HTTP 503으로 반환합니다. 연결·통신·응답 조립을 포함하는 엄격한 5초 완료 상한은 아니며, 쓰기에는 별도 예산을 둡니다. [설계 §18](docs/architecture-decisions.md#18-8-c-동기화-중복-실행과-db-시간-예산)에 지원 범위와 설정을 정리했습니다.
+카탈로그 갱신은 한 인스턴스에서 실행합니다. 현재 운영 호출처인 `fixedDelay` 스케줄이 실행을 직렬화하며, 서비스의 중복 실행 guard는 향후 추가 호출을 위한 보조 방어입니다. 현재 수동 트리거 API는 없습니다. 여러 서버에서는 나머지 서버의 스케줄을 `SUPPLIER_CATALOG_ENABLED=false`로 꺼야 합니다.
+
+검색 DB 조회는 남은 요청 예산과 기본 1초 SQL·300ms 잠금 한도를 적용하고, 연결 획득은 기본 500ms로 제한합니다. 정상 조회에는 timeout 설정 SQL 1개와 데이터 조회 SQL 1개가 필요합니다. DB 자원 실패는 Supplier 호출 없이 `CATALOG_UNAVAILABLE` / HTTP 503으로 반환합니다. 이 코드는 카탈로그를 사용할 수 없다는 뜻으로, 고객은 매핑 미확보·정상 빈 카탈로그·DB 읽기 실패를 구분할 수 없습니다. DB 원인은 `search.catalog.read.failures`와 로그에서 확인합니다. Supplier 검색의 정상 빈 응답은 성공으로 처리합니다.
+
+연결·통신·응답 조립을 포함하는 엄격한 5초 완료 상한은 아니며, 쓰기에는 별도 예산을 둡니다. 운영 Flyway도 공유 DataSource의 기본 SQL 10초·잠금 대기 2초 제한을 받으므로 장시간 migration을 도입하기 전에 전용 예산을 검토해야 합니다. [설계 §18](docs/architecture-decisions.md#18-8-c-동기화-중복-실행과-db-시간-예산)에 비용·지원 범위·트랜잭션 중첩 제약을 정리했습니다.
 
 SpringDoc/Swagger는 아직 도입하지 않았습니다. 공개 검색 endpoint가 하나인 현재는 위 요청 예시를 제공하고, 응답 계약 안정화 후 자동 문서 추가를 검토합니다. Resilience4j도 아직 사용하지 않습니다. 카탈로그는 Reactor의 제한 retry를 사용하고, 검색은 추가 retry 없이 timeout과 부분 결과를 사용합니다. 전역 허용량과 지표를 바탕으로 반복 장애 양상을 확인한 뒤 circuit breaker 도입을 판단합니다.
 
