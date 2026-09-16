@@ -1,6 +1,5 @@
 package com.supplierhub.supplier.supplierb;
 
-import java.time.LocalDate;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -8,6 +7,7 @@ import java.util.Objects;
 import java.util.stream.Collectors;
 
 import reactor.core.publisher.Mono;
+import tools.jackson.databind.JsonNode;
 
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.core.codec.DecodingException;
@@ -16,8 +16,10 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.reactive.function.client.ClientResponse;
 import org.springframework.web.reactive.function.client.WebClient;
 import org.springframework.web.reactive.function.client.WebClientRequestException;
+import org.springframework.web.reactive.function.client.WebClientResponseException;
 
 import com.supplierhub.catalog.domain.Supplier;
+import com.supplierhub.search.application.OfferMappingException;
 import com.supplierhub.search.application.OfferNormalizationResult;
 import com.supplierhub.search.application.OfferNormalizer;
 import com.supplierhub.search.domain.DailyInventory;
@@ -27,6 +29,7 @@ import com.supplierhub.search.domain.Price;
 import com.supplierhub.supplier.common.SupplierFailureType;
 import com.supplierhub.supplier.common.SupplierHttpFailureMapper;
 import com.supplierhub.supplier.common.SupplierIntegrationException;
+import com.supplierhub.supplier.common.SupplierJson;
 import com.supplierhub.supplier.common.SupplierIntegrationProperties;
 import com.supplierhub.supplier.common.SupplierSearchClient;
 import com.supplierhub.supplier.common.SupplierSearchRequest;
@@ -66,15 +69,15 @@ public class SupplierBSearchClient implements SupplierSearchClient {
 		return webClient.get()
 			.uri(uriBuilder -> uriBuilder
 				.path("/b/api/search")
-				.queryParam("propertyIds", propertyIds)
+				.queryParam("propertyIds", "{codes}")
 				.queryParam("checkIn", request.criteria().checkIn())
 				.queryParam("checkOut", request.criteria().checkOut())
 				.queryParam("adults", request.criteria().adults())
 				.queryParam("children", request.criteria().children())
-				.build())
+				.build(Map.of("codes", propertyIds)))
 			.retrieve()
 			.onStatus(HttpStatusCode::isError, this::httpFailure)
-			.bodyToMono(SearchResponse.class)
+			.bodyToMono(JsonNode.class)
 			.switchIfEmpty(Mono.error(invalidResponse()))
 			.map(response -> normalize(response, request, mappings))
 			.timeout(properties.search().callTimeout())
@@ -96,6 +99,12 @@ public class SupplierBSearchClient implements SupplierSearchClient {
 				)
 			)
 			.onErrorMap(
+				WebClientResponseException.class,
+				cause -> SupplierTransportFailureMapper.responseFailure(
+					supplier(), "Supplier B search request", cause
+				)
+			)
+			.onErrorMap(
 				DecodingException.class,
 				cause -> new SupplierIntegrationException(
 					supplier(),
@@ -108,20 +117,27 @@ public class SupplierBSearchClient implements SupplierSearchClient {
 	}
 
 	private SupplierSearchResult normalize(
-		SearchResponse response,
+		JsonNode response,
 		SupplierSearchRequest request,
 		Map<SupplierItemKey, InternalMapping> mappings
 	) {
-		if (!SUCCESS_CODE.equals(response.resultCode())) {
-			throw bodyFailure(response.resultCode());
-		}
-		if (response.data() == null || response.data().items() == null) {
-			throw invalidResponse();
+		List<JsonNode> items;
+		try {
+			String code = SupplierJson.text(response, "resultCode");
+			if (!SUCCESS_CODE.equals(code)) {
+				throw SupplierBFailureMapper.bodyFailure(code, "search");
+			}
+			items = SupplierJson.array(SupplierJson.field(response, "data"), "items");
+		} catch (IllegalArgumentException exception) {
+			throw new SupplierIntegrationException(
+				supplier(), SupplierFailureType.INVALID_RESPONSE, false,
+				"Supplier search envelope was invalid", exception
+			);
 		}
 		OfferNormalizationResult normalized = OfferNormalizer.normalize(
 			request.criteria(),
 			supplier(),
-			response.data().items(),
+			items,
 			item -> toCandidate(item, mappings)
 		);
 		return new SupplierSearchResult(
@@ -132,45 +148,30 @@ public class SupplierBSearchClient implements SupplierSearchClient {
 		);
 	}
 
-	private OfferCandidate toCandidate(
-		SearchItem item,
-		Map<SupplierItemKey, InternalMapping> mappings
-	) {
-		Objects.requireNonNull(item, "search item must not be null");
-		InternalMapping mapping = mappings.get(new SupplierItemKey(
-			item.propertyId(),
-			item.roomId()
-		));
-		if (mapping == null) {
-			throw new IllegalArgumentException(
-				"search item must have an active internal mapping"
+	private OfferCandidate toCandidate(JsonNode item, Map<SupplierItemKey, InternalMapping> mappings) {
+		try {
+			InternalMapping mapping = mappings.get(new SupplierItemKey(
+				SupplierJson.text(item, "propertyId"), SupplierJson.text(item, "roomId")
+			));
+			if (mapping == null) {
+				throw new IllegalArgumentException("search item must have an active internal mapping");
+			}
+			if (!SupplierJson.bool(item, "taxIncluded")) {
+				throw new IllegalArgumentException("totalPrice must include tax");
+			}
+			List<DailyInventory> inventory = SupplierJson.array(item, "inventory").stream()
+				.map(day -> new DailyInventory(
+					SupplierJson.date(day, "date"), SupplierJson.integer(day, "remainingRooms")
+				)).toList();
+			return new OfferCandidate(
+				mapping.propertyId(), mapping.roomTypeId(), supplier(),
+				SupplierJson.integer(item, "maxOccupancy"), SupplierJson.bool(item, "breakfastIncluded"),
+				Price.totalOnly(Money.of(SupplierJson.text(item, "currency"), SupplierJson.longInteger(item, "totalPrice"))),
+				inventory
 			);
+		} catch (IllegalArgumentException | ArithmeticException exception) {
+			throw new OfferMappingException(exception);
 		}
-		if (!Boolean.TRUE.equals(item.taxIncluded())) {
-			throw new IllegalArgumentException("totalPrice must include tax");
-		}
-		List<Inventory> inventory = required(item.inventory(), "inventory");
-
-		return new OfferCandidate(
-			mapping.propertyId(),
-			mapping.roomTypeId(),
-			supplier(),
-			required(item.maxOccupancy(), "maxOccupancy"),
-			required(item.breakfastIncluded(), "breakfastIncluded"),
-			Price.totalOnly(Money.of(
-				item.currency(),
-				required(item.totalPrice(), "totalPrice")
-			)),
-			inventory.stream().map(this::toDailyInventory).toList()
-		);
-	}
-
-	private DailyInventory toDailyInventory(Inventory inventory) {
-		Objects.requireNonNull(inventory, "inventory item must not be null");
-		return new DailyInventory(
-			required(inventory.date(), "inventory date"),
-			required(inventory.remainingRooms(), "remainingRooms")
-		);
 	}
 
 	private Map<SupplierItemKey, InternalMapping> mappings(
@@ -208,27 +209,6 @@ public class SupplierBSearchClient implements SupplierSearchClient {
 		));
 	}
 
-	private SupplierIntegrationException bodyFailure(String resultCode) {
-		if (resultCode == null) {
-			return invalidResponse();
-		}
-		SupplierFailureType failureType = switch (resultCode) {
-			case "E400" -> SupplierFailureType.INVALID_REQUEST;
-			case "E401" -> SupplierFailureType.AUTHENTICATION_FAILED;
-			case "E429" -> SupplierFailureType.RATE_LIMITED;
-			case "E500", "E503" -> SupplierFailureType.UNAVAILABLE;
-			default -> SupplierFailureType.INVALID_RESPONSE;
-		};
-		boolean retryable = "E500".equals(resultCode)
-			|| "E503".equals(resultCode);
-		return new SupplierIntegrationException(
-			supplier(),
-			failureType,
-			retryable,
-			"Supplier B search returned a failure result"
-		);
-	}
-
 	private SupplierIntegrationException invalidResponse() {
 		return new SupplierIntegrationException(
 			supplier(),
@@ -236,40 +216,6 @@ public class SupplierBSearchClient implements SupplierSearchClient {
 			false,
 			"Supplier B search response was incomplete"
 		);
-	}
-
-	private static <T> T required(T value, String fieldName) {
-		if (value == null) {
-			throw new IllegalArgumentException(fieldName + " must not be null");
-		}
-		return value;
-	}
-
-	private record SearchResponse(
-		String resultCode,
-		String resultMessage,
-		Data data
-	) {
-	}
-
-	private record Data(List<SearchItem> items) {
-	}
-
-	private record SearchItem(
-		String propertyId,
-		String propertyName,
-		String roomId,
-		String roomName,
-		Integer maxOccupancy,
-		Boolean breakfastIncluded,
-		String currency,
-		Long totalPrice,
-		Boolean taxIncluded,
-		List<Inventory> inventory
-	) {
-	}
-
-	private record Inventory(LocalDate date, Integer remainingRooms) {
 	}
 
 	private record SupplierItemKey(

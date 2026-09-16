@@ -9,6 +9,7 @@ public enum SupplierFailureType {
 	TIMEOUT,
 	INVALID_RESPONSE,
 	CATALOG_UNAVAILABLE,
+	INTERNAL_ERROR,
 	UNKNOWN
 
 }

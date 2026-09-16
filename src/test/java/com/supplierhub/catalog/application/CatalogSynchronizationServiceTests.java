@@ -1,6 +1,7 @@
 package com.supplierhub.catalog.application;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.net.URI;
 import java.time.Duration;
@@ -89,7 +90,7 @@ class CatalogSynchronizationServiceTests {
 		service.synchronizeAll();
 
 		assertThat(output)
-			.contains("failureType=UNKNOWN")
+			.contains("failureType=INTERNAL_ERROR")
 			.contains("IllegalStateException: database write failed");
 	}
 
@@ -133,13 +134,60 @@ class CatalogSynchronizationServiceTests {
 			store,
 			Duration.ofSeconds(2),
 			false,
-			true
+			false
 		);
 
 		service.synchronizeAll();
 
 		assertThat(attempts).hasValue(0);
 		assertThat(store.snapshots).isEmpty();
+	}
+
+	@Test
+	void rejectsDuplicateClientsAndMissingEnabledClientsAtStartup() {
+		var client = client(Supplier.SUPPLIER_A, Mono.just(emptySnapshot(Supplier.SUPPLIER_A)));
+		var store = new RecordingSnapshotStore();
+		assertThatThrownBy(() -> service(List.of(client, client), store))
+			.isInstanceOf(IllegalArgumentException.class).hasMessageContaining("at most once");
+		assertThatThrownBy(() -> service(List.of(client), store, Duration.ofSeconds(2), true, true))
+			.isInstanceOf(IllegalArgumentException.class).hasMessageContaining("SUPPLIER_B");
+		assertThat(store.snapshots).isEmpty();
+	}
+
+	@Test
+	void rejectsForeignSnapshotAndContinuesWithHealthySupplier(CapturedOutput output) {
+		var wrong = client(Supplier.SUPPLIER_A, Mono.just(emptySnapshot(Supplier.SUPPLIER_B)));
+		var healthy = emptySnapshot(Supplier.SUPPLIER_B);
+		var store = new RecordingSnapshotStore();
+		service(List.of(wrong, client(Supplier.SUPPLIER_B, Mono.just(healthy))), store).synchronizeAll();
+		assertThat(store.snapshots).containsExactly(healthy);
+		assertThat(output).contains("failureType=INTERNAL_ERROR");
+	}
+
+	@Test
+	void rejectsEmptyCatalogPublisherWithoutSaving(CapturedOutput output) {
+		var store = new RecordingSnapshotStore();
+		service(List.of(client(Supplier.SUPPLIER_A, Mono.empty())), store).synchronizeAll();
+		assertThat(store.snapshots).isEmpty();
+		assertThat(output).contains("failureType=INVALID_RESPONSE");
+	}
+
+	@Test
+	void retriesRetryableFailureThrownBeforePublisherCreation() {
+		AtomicInteger attempts = new AtomicInteger();
+		SupplierCatalogClient client = new SupplierCatalogClient() {
+			public Supplier supplier() { return Supplier.SUPPLIER_A; }
+			public Mono<CatalogSnapshot> fetchCatalog() {
+				if (attempts.incrementAndGet() < 3) {
+					throw failure(supplier(), true);
+				}
+				return Mono.just(emptySnapshot(supplier()));
+			}
+		};
+		var store = new RecordingSnapshotStore();
+		service(List.of(client), store).synchronizeAll();
+		assertThat(attempts).hasValue(3);
+		assertThat(store.snapshots).hasSize(1);
 	}
 
 	private CatalogSynchronizationService service(
@@ -154,7 +202,9 @@ class CatalogSynchronizationServiceTests {
 		CatalogSnapshotStore store,
 		Duration callTimeout
 	) {
-		return service(clients, store, callTimeout, true, true);
+		return service(clients, store, callTimeout,
+			clients.stream().anyMatch(client -> client.supplier() == Supplier.SUPPLIER_A),
+			clients.stream().anyMatch(client -> client.supplier() == Supplier.SUPPLIER_B));
 	}
 
 	private CatalogSynchronizationService service(

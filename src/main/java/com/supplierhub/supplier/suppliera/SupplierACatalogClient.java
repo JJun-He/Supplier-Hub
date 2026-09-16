@@ -3,6 +3,7 @@ package com.supplierhub.supplier.suppliera;
 import java.util.List;
 
 import reactor.core.publisher.Mono;
+import tools.jackson.databind.JsonNode;
 
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.core.codec.DecodingException;
@@ -11,6 +12,7 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.reactive.function.client.ClientResponse;
 import org.springframework.web.reactive.function.client.WebClient;
 import org.springframework.web.reactive.function.client.WebClientRequestException;
+import org.springframework.web.reactive.function.client.WebClientResponseException;
 
 import com.supplierhub.catalog.domain.CatalogSnapshot;
 import com.supplierhub.catalog.domain.CatalogSnapshot.CatalogProperty;
@@ -20,6 +22,7 @@ import com.supplierhub.supplier.common.SupplierCatalogClient;
 import com.supplierhub.supplier.common.SupplierFailureType;
 import com.supplierhub.supplier.common.SupplierHttpFailureMapper;
 import com.supplierhub.supplier.common.SupplierIntegrationException;
+import com.supplierhub.supplier.common.SupplierJson;
 import com.supplierhub.supplier.common.SupplierTransportFailureMapper;
 
 @Component
@@ -44,7 +47,7 @@ public class SupplierACatalogClient implements SupplierCatalogClient {
 			.uri("/a/v1/hotels")
 			.retrieve()
 			.onStatus(HttpStatusCode::isError, this::httpFailure)
-			.bodyToMono(HotelsResponse.class)
+			.bodyToMono(JsonNode.class)
 			.switchIfEmpty(Mono.error(invalidResponse()))
 			.map(this::toSnapshot)
 			.onErrorMap(
@@ -53,6 +56,12 @@ public class SupplierACatalogClient implements SupplierCatalogClient {
 					supplier(),
 					"Supplier A catalog request",
 					cause
+				)
+			)
+			.onErrorMap(
+				WebClientResponseException.class,
+				cause -> SupplierTransportFailureMapper.responseFailure(
+					supplier(), "Supplier A catalog request", cause
 				)
 			)
 			.onErrorMap(
@@ -85,41 +94,19 @@ public class SupplierACatalogClient implements SupplierCatalogClient {
 		));
 	}
 
-	private CatalogSnapshot toSnapshot(HotelsResponse response) {
-		if (response.items() == null) {
-			throw invalidResponse();
-		}
-
-		List<CatalogProperty> properties = response.items().stream()
-			.map(this::toProperty)
-			.toList();
+	private CatalogSnapshot toSnapshot(JsonNode response) {
+		List<CatalogProperty> properties = SupplierJson.array(response, "items").stream()
+			.map(this::toProperty).toList();
 		return new CatalogSnapshot(supplier(), properties);
 	}
 
-	private CatalogProperty toProperty(Hotel hotel) {
-		if (hotel == null || hotel.roomTypes() == null) {
-			throw invalidResponse();
-		}
-
-		List<CatalogRoomType> roomTypes = hotel.roomTypes().stream()
-			.map(this::toRoomType)
-			.toList();
-		return new CatalogProperty(
-			hotel.hotelCode(),
-			hotel.hotelName(),
-			roomTypes
-		);
-	}
-
-	private CatalogRoomType toRoomType(RoomType roomType) {
-		if (roomType == null) {
-			throw invalidResponse();
-		}
-		return new CatalogRoomType(
-			roomType.roomTypeCode(),
-			roomType.roomTypeName(),
-			roomType.maxOccupancy()
-		);
+	private CatalogProperty toProperty(JsonNode item) {
+		List<CatalogRoomType> rooms = SupplierJson.array(item, "roomTypes").stream()
+			.map(room -> new CatalogRoomType(
+				SupplierJson.text(room, "roomTypeCode"), SupplierJson.text(room, "roomTypeName"),
+				SupplierJson.integer(room, "maxOccupancy")
+			)).toList();
+		return new CatalogProperty(SupplierJson.text(item, "hotelCode"), SupplierJson.text(item, "hotelName"), rooms);
 	}
 
 	private SupplierIntegrationException invalidResponse() {
@@ -129,23 +116,6 @@ public class SupplierACatalogClient implements SupplierCatalogClient {
 			false,
 			"Supplier A catalog response was incomplete"
 		);
-	}
-
-	private record HotelsResponse(List<Hotel> items) {
-	}
-
-	private record Hotel(
-		String hotelCode,
-		String hotelName,
-		List<RoomType> roomTypes
-	) {
-	}
-
-	private record RoomType(
-		String roomTypeCode,
-		String roomTypeName,
-		int maxOccupancy
-	) {
 	}
 
 }

@@ -8,6 +8,7 @@ import io.netty.handler.timeout.ReadTimeoutException;
 import io.netty.handler.timeout.WriteTimeoutException;
 
 import org.springframework.web.reactive.function.client.WebClientRequestException;
+import org.springframework.web.reactive.function.client.WebClientResponseException;
 
 import com.supplierhub.catalog.domain.Supplier;
 
@@ -30,6 +31,15 @@ public final class SupplierTransportFailureMapper {
 			true,
 			requestDescription + " failed",
 			cause
+		);
+	}
+
+	public static SupplierIntegrationException responseFailure(
+		Supplier supplier, String requestDescription, WebClientResponseException cause
+	) {
+		return new SupplierIntegrationException(
+			supplier, SupplierFailureType.UNKNOWN, false,
+			requestDescription + " response could not be read", cause
 		);
 	}
 

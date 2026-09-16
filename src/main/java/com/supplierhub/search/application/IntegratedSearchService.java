@@ -193,12 +193,11 @@ public class IntegratedSearchService {
 			.map(result -> successfulBatch(client, indexedRequest, result))
 			.onErrorResume(cause -> {
 				SupplierFailureType failureType = failureType(cause);
-				log.warn(
+				var event = failureType == SupplierFailureType.INTERNAL_ERROR
+					? log.atError() : log.atWarn();
+				event.setCause(cause).log(
 					"Supplier search batch failed: supplier={}, batch={}, failureType={}",
-					client.supplier(),
-					indexedRequest.index(),
-					failureType,
-					cause
+					client.supplier(), indexedRequest.index(), failureType
 				);
 				return Mono.just(BatchSearchOutcome.failed(
 					client.supplier(),
@@ -361,7 +360,7 @@ public class IntegratedSearchService {
 		if (cause instanceof SupplierIntegrationException exception) {
 			return exception.getFailureType();
 		}
-		return SupplierFailureType.UNKNOWN;
+		return SupplierFailureType.INTERNAL_ERROR;
 	}
 
 	private Duration remainingTimeout(long startedAt) {

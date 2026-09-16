@@ -377,6 +377,22 @@ class IntegratedSearchServiceTests {
 		assertThat(supplierBCalled).isFalse();
 	}
 
+	@Test
+	void distinguishesInternalFailureAndPreservesHealthyOffers() {
+		List<ActiveCatalogMapping> rows = new ArrayList<>(mappings(Supplier.SUPPLIER_A, 1, 1));
+		rows.addAll(mappings(Supplier.SUPPLIER_B, 1, 2));
+		when(mappingReader.findAllActive()).thenReturn(rows);
+		Offer healthy = offer(Supplier.SUPPLIER_B, 2, 20);
+		var service = service(List.of(
+			client(Supplier.SUPPLIER_A, request -> { throw new NullPointerException("adapter bug"); }),
+			client(Supplier.SUPPLIER_B, request -> Mono.just(success(request.supplier(), healthy)))
+		), Duration.ofSeconds(1), 4);
+		var result = service.search(CRITERIA);
+		assertThat(result.status()).isEqualTo(SearchStatus.PARTIAL);
+		assertThat(result.offers()).containsExactly(healthy);
+		assertThat(result.supplierResults().getFirst().failureTypes()).containsExactly(SupplierFailureType.INTERNAL_ERROR);
+	}
+
 	private IntegratedSearchService service(
 		List<SupplierSearchClient> clients,
 		Duration overallTimeout,

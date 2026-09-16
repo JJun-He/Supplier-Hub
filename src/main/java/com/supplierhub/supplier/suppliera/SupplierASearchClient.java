@@ -1,6 +1,6 @@
 package com.supplierhub.supplier.suppliera;
 
-import java.time.LocalDate;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -8,6 +8,7 @@ import java.util.Objects;
 import java.util.stream.Collectors;
 
 import reactor.core.publisher.Mono;
+import tools.jackson.databind.JsonNode;
 
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.core.codec.DecodingException;
@@ -16,8 +17,10 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.reactive.function.client.ClientResponse;
 import org.springframework.web.reactive.function.client.WebClient;
 import org.springframework.web.reactive.function.client.WebClientRequestException;
+import org.springframework.web.reactive.function.client.WebClientResponseException;
 
 import com.supplierhub.catalog.domain.Supplier;
+import com.supplierhub.search.application.OfferMappingException;
 import com.supplierhub.search.application.OfferNormalizationResult;
 import com.supplierhub.search.application.OfferNormalizer;
 import com.supplierhub.search.domain.DailyInventory;
@@ -28,6 +31,7 @@ import com.supplierhub.search.domain.Price;
 import com.supplierhub.supplier.common.SupplierFailureType;
 import com.supplierhub.supplier.common.SupplierHttpFailureMapper;
 import com.supplierhub.supplier.common.SupplierIntegrationException;
+import com.supplierhub.supplier.common.SupplierJson;
 import com.supplierhub.supplier.common.SupplierIntegrationProperties;
 import com.supplierhub.supplier.common.SupplierSearchClient;
 import com.supplierhub.supplier.common.SupplierSearchRequest;
@@ -65,15 +69,15 @@ public class SupplierASearchClient implements SupplierSearchClient {
 		return webClient.get()
 			.uri(uriBuilder -> uriBuilder
 				.path("/a/v1/availability")
-				.queryParam("hotelCodes", hotelCodes)
+				.queryParam("hotelCodes", "{codes}")
 				.queryParam("checkIn", request.criteria().checkIn())
 				.queryParam("checkOut", request.criteria().checkOut())
 				.queryParam("adults", request.criteria().adults())
 				.queryParam("children", request.criteria().children())
-				.build())
+				.build(Map.of("codes", hotelCodes)))
 			.retrieve()
 			.onStatus(HttpStatusCode::isError, this::httpFailure)
-			.bodyToMono(AvailabilityResponse.class)
+			.bodyToMono(JsonNode.class)
 			.switchIfEmpty(Mono.error(invalidResponse()))
 			.map(response -> normalize(response, request, mappings))
 			.timeout(properties.search().callTimeout())
@@ -95,6 +99,12 @@ public class SupplierASearchClient implements SupplierSearchClient {
 				)
 			)
 			.onErrorMap(
+				WebClientResponseException.class,
+				cause -> SupplierTransportFailureMapper.responseFailure(
+					supplier(), "Supplier A search request", cause
+				)
+			)
+			.onErrorMap(
 				DecodingException.class,
 				cause -> new SupplierIntegrationException(
 					supplier(),
@@ -107,17 +117,23 @@ public class SupplierASearchClient implements SupplierSearchClient {
 	}
 
 	private SupplierSearchResult normalize(
-		AvailabilityResponse response,
+		JsonNode response,
 		SupplierSearchRequest request,
 		Map<SupplierItemKey, InternalMapping> mappings
 	) {
-		if (response.items() == null) {
-			throw invalidResponse();
+		List<JsonNode> items;
+		try {
+			items = SupplierJson.array(response, "items");
+		} catch (IllegalArgumentException exception) {
+			throw new SupplierIntegrationException(
+				supplier(), SupplierFailureType.INVALID_RESPONSE, false,
+				"Supplier search envelope was invalid", exception
+			);
 		}
 		OfferNormalizationResult normalized = OfferNormalizer.normalize(
 			request.criteria(),
 			supplier(),
-			response.items(),
+			items,
 			item -> toCandidate(item, mappings)
 		);
 		return new SupplierSearchResult(
@@ -128,57 +144,32 @@ public class SupplierASearchClient implements SupplierSearchClient {
 		);
 	}
 
-	private OfferCandidate toCandidate(
-		AvailabilityItem item,
-		Map<SupplierItemKey, InternalMapping> mappings
-	) {
-		Objects.requireNonNull(item, "availability item must not be null");
-		InternalMapping mapping = mappings.get(new SupplierItemKey(
-			item.hotelCode(),
-			item.roomTypeCode()
-		));
-		if (mapping == null) {
-			throw new IllegalArgumentException(
-				"availability item must have an active internal mapping"
+	private OfferCandidate toCandidate(JsonNode item, Map<SupplierItemKey, InternalMapping> mappings) {
+		try {
+			InternalMapping mapping = mappings.get(new SupplierItemKey(
+				SupplierJson.text(item, "hotelCode"), SupplierJson.text(item, "roomTypeCode")
+			));
+			if (mapping == null) {
+				throw new IllegalArgumentException("availability item must have an active internal mapping");
+			}
+			String currency = SupplierJson.text(item, "currency");
+			List<JsonNode> rates = SupplierJson.array(item, "dailyRates");
+			List<NightlyPrice> prices = rates.stream().map(rate -> new NightlyPrice(
+				SupplierJson.date(rate, "date"),
+				Money.of(currency, SupplierJson.longInteger(rate, "nightlyRate")),
+				Money.of(currency, SupplierJson.longInteger(rate, "taxAmount"))
+			)).sorted(Comparator.comparing(NightlyPrice::date)).toList();
+			List<DailyInventory> inventory = rates.stream().map(rate -> new DailyInventory(
+				SupplierJson.date(rate, "date"), SupplierJson.integer(rate, "remainingRooms")
+			)).toList();
+			return new OfferCandidate(
+				mapping.propertyId(), mapping.roomTypeId(), supplier(),
+				SupplierJson.integer(item, "maxOccupancy"), SupplierJson.bool(item, "breakfastIncluded"),
+				Price.fromNightlyPrices(prices), inventory
 			);
+		} catch (IllegalArgumentException | ArithmeticException exception) {
+			throw new OfferMappingException(exception);
 		}
-		List<DailyRate> dailyRates = required(
-			item.dailyRates(),
-			"dailyRates"
-		);
-		List<NightlyPrice> nightlyPrices = dailyRates.stream()
-			.map(rate -> toNightlyPrice(rate, item.currency()))
-			.toList();
-		List<DailyInventory> dailyInventory = dailyRates.stream()
-			.map(this::toDailyInventory)
-			.toList();
-
-		return new OfferCandidate(
-			mapping.propertyId(),
-			mapping.roomTypeId(),
-			supplier(),
-			required(item.maxOccupancy(), "maxOccupancy"),
-			required(item.breakfastIncluded(), "breakfastIncluded"),
-			Price.fromNightlyPrices(nightlyPrices),
-			dailyInventory
-		);
-	}
-
-	private NightlyPrice toNightlyPrice(DailyRate rate, String currency) {
-		Objects.requireNonNull(rate, "daily rate must not be null");
-		return new NightlyPrice(
-			required(rate.date(), "daily rate date"),
-			Money.of(currency, required(rate.nightlyRate(), "nightlyRate")),
-			Money.of(currency, required(rate.taxAmount(), "taxAmount"))
-		);
-	}
-
-	private DailyInventory toDailyInventory(DailyRate rate) {
-		Objects.requireNonNull(rate, "daily rate must not be null");
-		return new DailyInventory(
-			required(rate.date(), "daily rate date"),
-			required(rate.remainingRooms(), "remainingRooms")
-		);
 	}
 
 	private Map<SupplierItemKey, InternalMapping> mappings(
@@ -223,36 +214,6 @@ public class SupplierASearchClient implements SupplierSearchClient {
 			false,
 			"Supplier A search response was incomplete"
 		);
-	}
-
-	private static <T> T required(T value, String fieldName) {
-		if (value == null) {
-			throw new IllegalArgumentException(fieldName + " must not be null");
-		}
-		return value;
-	}
-
-	private record AvailabilityResponse(List<AvailabilityItem> items) {
-	}
-
-	private record AvailabilityItem(
-		String hotelCode,
-		String hotelName,
-		String roomTypeCode,
-		String roomTypeName,
-		Integer maxOccupancy,
-		Boolean breakfastIncluded,
-		String currency,
-		List<DailyRate> dailyRates
-	) {
-	}
-
-	private record DailyRate(
-		LocalDate date,
-		Integer remainingRooms,
-		Long nightlyRate,
-		Long taxAmount
-	) {
 	}
 
 	private record SupplierItemKey(

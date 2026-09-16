@@ -1,6 +1,7 @@
 package com.supplierhub.search.application;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.time.LocalDate;
 import java.util.List;
@@ -27,6 +28,18 @@ class OfferNormalizerTests {
 		2,
 		0
 	);
+
+	@Test
+	void propagatesProgrammingErrorsInsteadOfRejectingAnItem() {
+		for (RuntimeException bug : List.of(
+			new NullPointerException("mapper bug"), new IllegalStateException("mapper bug"),
+			new IllegalArgumentException("unexpected mapper bug")
+		)) {
+			assertThatThrownBy(() -> OfferNormalizer.normalize(
+				CRITERIA, Supplier.SUPPLIER_B, List.of("item"), ignored -> { throw bug; }
+			)).isSameAs(bug);
+		}
+	}
 
 	@Test
 	void createsAvailableOfferWithWholeStayInventory() {
@@ -87,16 +100,13 @@ class OfferNormalizerTests {
 			CRITERIA,
 			Supplier.SUPPLIER_B,
 			rawOffers,
-			rawOffer -> candidate(
-				2,
-				Price.totalOnly(Money.of(
-					rawOffer.currency(),
-					rawOffer.totalAmount()
-				)),
-				3,
-				1,
-				5
-			)
+			rawOffer -> {
+				try {
+					return candidate(2, Price.totalOnly(Money.of(rawOffer.currency(), rawOffer.totalAmount())), 3, 1, 5);
+				} catch (IllegalArgumentException exception) {
+					throw new OfferMappingException(exception);
+				}
+			}
 		);
 
 		assertThat(result.offers()).hasSize(1);

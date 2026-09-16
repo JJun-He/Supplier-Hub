@@ -15,6 +15,8 @@ import java.util.List;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
@@ -123,8 +125,9 @@ class StaySearchControllerTests {
 			.andExpect(jsonPath("$..supplierRoomTypeCode").doesNotExist());
 	}
 
-	@Test
-	void returnsHttpOkAndFailureDetailsForPartialSearch() throws Exception {
+	@ParameterizedTest
+	@EnumSource(value = SupplierFailureType.class, names = {"TIMEOUT", "INTERNAL_ERROR"})
+	void returnsHttpOkAndFailureDetailsForPartialSearch(SupplierFailureType failureType) throws Exception {
 		Offer offer = offer(
 			1,
 			10,
@@ -156,7 +159,7 @@ class StaySearchControllerTests {
 						List.of(),
 						0,
 						0,
-						List.of(SupplierFailureType.TIMEOUT)
+						List.of(failureType)
 					)
 				)
 			)
@@ -171,11 +174,12 @@ class StaySearchControllerTests {
 				.value("SUPPLIER_B"))
 			.andExpect(jsonPath("$.supplierResults[1].status").value("FAILED"))
 			.andExpect(jsonPath("$.supplierResults[1].failureTypes[0]")
-				.value("TIMEOUT"));
+				.value(failureType.name()));
 	}
 
-	@Test
-	void returnsHttpServiceUnavailableWhileKeepingFailureBody() throws Exception {
+	@ParameterizedTest
+	@EnumSource(value = SupplierFailureType.class, names = {"CATALOG_UNAVAILABLE", "INTERNAL_ERROR"})
+	void returnsHttpServiceUnavailableWhileKeepingFailureBody(SupplierFailureType failureType) throws Exception {
 		when(searchService.search(any(SearchCriteria.class))).thenReturn(
 			new IntegratedSearchResult(
 				SearchStatus.FAILED,
@@ -185,7 +189,7 @@ class StaySearchControllerTests {
 					List.of(),
 					0,
 					0,
-					List.of(SupplierFailureType.CATALOG_UNAVAILABLE)
+					List.of(failureType)
 				))
 			)
 		);
@@ -195,7 +199,7 @@ class StaySearchControllerTests {
 			.andExpect(jsonPath("$.status").value("FAILED"))
 			.andExpect(jsonPath("$.stays").isEmpty())
 			.andExpect(jsonPath("$.supplierResults[0].failureTypes[0]")
-				.value("CATALOG_UNAVAILABLE"));
+				.value(failureType.name()));
 	}
 
 	@Test

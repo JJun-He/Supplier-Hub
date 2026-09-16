@@ -1,9 +1,13 @@
 package com.supplierhub.search.application;
 
-import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import java.util.function.Function;
 
 import org.slf4j.Logger;
@@ -61,14 +65,22 @@ public final class OfferNormalizer {
 		Objects.requireNonNull(sourceSupplier, "sourceSupplier must not be null");
 		Objects.requireNonNull(sourceItems, "sourceItems must not be null");
 		Objects.requireNonNull(candidateMapper, "candidateMapper must not be null");
-		List<Offer> offers = new ArrayList<>();
+		Set<Offer> offers = new LinkedHashSet<>();
 		int rejectedOfferCount = 0;
 		int unavailableOfferCount = 0;
 
 		for (int index = 0; index < sourceItems.size(); index++) {
-			OfferCandidate candidate = null;
+			OfferCandidate candidate;
 			try {
-				candidate = candidateMapper.apply(sourceItems.get(index));
+				candidate = Objects.requireNonNull(
+					candidateMapper.apply(sourceItems.get(index)), "candidate mapper must return a value"
+				);
+			} catch (OfferMappingException exception) {
+				rejectedOfferCount++;
+				logRejection(index, sourceSupplier, null, exception);
+				continue;
+			}
+			try {
 				if (candidate.supplier() != sourceSupplier) {
 					throw new IllegalArgumentException(
 						"candidate supplier must match the source supplier"
@@ -81,20 +93,40 @@ public final class OfferNormalizer {
 					unavailableOfferCount++;
 				}
 			} catch (
-				IllegalArgumentException
-					| ArithmeticException
-					| NullPointerException exception
+				IllegalArgumentException | ArithmeticException exception
 			) {
 				rejectedOfferCount++;
 				logRejection(index, sourceSupplier, candidate, exception);
 			}
 		}
 
+		rejectedOfferCount += rejectConflictingRoomCapacities(offers, sourceSupplier);
 		return new OfferNormalizationResult(
-			offers,
+			List.copyOf(offers),
 			rejectedOfferCount,
 			unavailableOfferCount
 		);
+	}
+
+	private static int rejectConflictingRoomCapacities(Set<Offer> offers, Supplier supplier) {
+		Map<Long, Integer> capacities = new HashMap<>();
+		Set<Long> conflictingRoomIds = new HashSet<>();
+		for (Offer offer : offers) {
+			Integer previous = capacities.putIfAbsent(offer.roomTypeId(), offer.maxOccupancy());
+			if (previous != null && previous != offer.maxOccupancy()) {
+				conflictingRoomIds.add(offer.roomTypeId());
+			}
+		}
+		int before = offers.size();
+		offers.removeIf(offer -> conflictingRoomIds.contains(offer.roomTypeId()));
+		int rejected = before - offers.size();
+		if (rejected > 0) {
+			log.warn(
+				"Supplier offers rejected due to conflicting room capacities: sourceSupplier={}, roomCount={}, offerCount={}",
+				supplier, conflictingRoomIds.size(), rejected
+			);
+		}
+		return rejected;
 	}
 
 	private static Optional<Offer> normalize(

@@ -2,7 +2,12 @@ package com.supplierhub.catalog.application;
 
 import java.time.Duration;
 import java.util.Comparator;
+import java.util.EnumSet;
 import java.util.List;
+import java.util.Objects;
+import java.util.Set;
+
+import reactor.core.publisher.Mono;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -36,6 +41,7 @@ public class CatalogSynchronizationService {
 		CatalogSnapshotStore snapshotStore,
 		SupplierIntegrationProperties properties
 	) {
+		requireClientContracts(clients, properties);
 		this.clients = clients.stream()
 			.filter(client -> properties.isEnabled(client.supplier()))
 			.sorted(Comparator.comparing(SupplierCatalogClient::supplier))
@@ -54,7 +60,7 @@ public class CatalogSynchronizationService {
 
 	private void synchronize(SupplierCatalogClient client) {
 		try {
-			CatalogSnapshot snapshot = client.fetchCatalog()
+			CatalogSnapshot snapshot = Mono.defer(client::fetchCatalog)
 				.timeout(callTimeout)
 				.onErrorMap(
 					cause -> !(cause instanceof SupplierIntegrationException)
@@ -77,6 +83,9 @@ public class CatalogSynchronizationService {
 					false,
 					"Supplier catalog completed without a snapshot"
 				);
+			}
+			if (snapshot.supplier() != client.supplier()) {
+				throw new IllegalStateException("Catalog snapshot supplier must match the client supplier");
 			}
 			CatalogSnapshotUpdate update = snapshotStore.replace(snapshot);
 			log.info(
@@ -108,12 +117,35 @@ public class CatalogSynchronizationService {
 				exception
 			);
 		} catch (RuntimeException exception) {
-			log.warn(
+			log.error(
 				"Supplier catalog synchronization failed: supplier={}, failureType={}",
 				client.supplier(),
-				SupplierFailureType.UNKNOWN,
+				SupplierFailureType.INTERNAL_ERROR,
 				exception
 			);
+		}
+	}
+
+	private void requireClientContracts(
+		List<SupplierCatalogClient> clients, SupplierIntegrationProperties properties
+	) {
+		Objects.requireNonNull(clients, "clients must not be null");
+		Set<Supplier> registered = EnumSet.noneOf(Supplier.class);
+		for (SupplierCatalogClient client : clients) {
+			Objects.requireNonNull(client, "catalog client must not be null");
+			Supplier supplier = Objects.requireNonNull(client.supplier(), "client supplier must not be null");
+			if (!registered.add(supplier)) {
+				throw new IllegalArgumentException("Catalog clients must contain each supplier at most once");
+			}
+		}
+		Set<Supplier> missing = EnumSet.noneOf(Supplier.class);
+		for (Supplier supplier : Supplier.values()) {
+			if (properties.isEnabled(supplier) && !registered.contains(supplier)) {
+				missing.add(supplier);
+			}
+		}
+		if (!missing.isEmpty()) {
+			throw new IllegalArgumentException("Enabled Suppliers have no catalog client: " + missing);
 		}
 	}
 
