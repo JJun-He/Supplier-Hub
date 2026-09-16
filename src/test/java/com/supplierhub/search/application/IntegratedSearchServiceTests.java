@@ -2,6 +2,7 @@ package com.supplierhub.search.application;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -20,6 +21,8 @@ import java.util.stream.IntStream;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 
 import reactor.core.publisher.Mono;
 
@@ -27,6 +30,7 @@ import com.supplierhub.catalog.domain.Supplier;
 import com.supplierhub.supplier.common.SupplierResourceFixture;
 import com.supplierhub.catalog.application.ActiveCatalogMapping;
 import com.supplierhub.catalog.application.ActiveCatalogMappingReader;
+import com.supplierhub.catalog.application.CatalogReadException;
 import com.supplierhub.search.domain.DailyInventory;
 import com.supplierhub.search.domain.Money;
 import com.supplierhub.search.domain.Offer;
@@ -62,7 +66,7 @@ class IntegratedSearchServiceTests {
 
 	@Test
 	void splitsFiftyOnePropertiesIntoFiftyAndOne() {
-		when(mappingReader.findAllActive())
+		when(mappingReader.findAllActive(anyLong()))
 			.thenReturn(mappings(Supplier.SUPPLIER_A, 51, 1));
 		List<Integer> batchSizes = new CopyOnWriteArrayList<>();
 		SupplierSearchClient client = client(Supplier.SUPPLIER_A, request -> {
@@ -91,7 +95,7 @@ class IntegratedSearchServiceTests {
 		List<ActiveCatalogMapping> rows = new ArrayList<>();
 		rows.addAll(mappings(Supplier.SUPPLIER_A, 1, 1));
 		rows.addAll(mappings(Supplier.SUPPLIER_B, 1, 100));
-		when(mappingReader.findAllActive()).thenReturn(rows);
+		when(mappingReader.findAllActive(anyLong())).thenReturn(rows);
 		AtomicInteger started = new AtomicInteger();
 		AtomicInteger completed = new AtomicInteger();
 		AtomicBoolean bothStartedBeforeCompletion = new AtomicBoolean();
@@ -121,7 +125,7 @@ class IntegratedSearchServiceTests {
 
 	@Test
 	void limitsConcurrentCallsInsideOneSupplier() {
-		when(mappingReader.findAllActive())
+		when(mappingReader.findAllActive(anyLong()))
 			.thenReturn(mappings(Supplier.SUPPLIER_A, 201, 1));
 		AtomicInteger inFlight = new AtomicInteger();
 		AtomicInteger maximumInFlight = new AtomicInteger();
@@ -152,7 +156,7 @@ class IntegratedSearchServiceTests {
 
 	@Test
 	void preservesCompletedOffersWhenAnotherBatchFails() {
-		when(mappingReader.findAllActive())
+		when(mappingReader.findAllActive(anyLong()))
 			.thenReturn(mappings(Supplier.SUPPLIER_A, 51, 1));
 		Offer offer = offer(Supplier.SUPPLIER_A, 1, 10);
 		SupplierSearchClient client = client(Supplier.SUPPLIER_A, request ->
@@ -188,7 +192,7 @@ class IntegratedSearchServiceTests {
 
 	@Test
 	void cancelsPendingWorkAtOverallTimeoutAndKeepsCompletedBatch() {
-		when(mappingReader.findAllActive())
+		when(mappingReader.findAllActive(anyLong()))
 			.thenReturn(mappings(Supplier.SUPPLIER_A, 101, 1));
 		Offer offer = offer(Supplier.SUPPLIER_A, 1, 10);
 		AtomicInteger started = new AtomicInteger();
@@ -222,7 +226,7 @@ class IntegratedSearchServiceTests {
 
 	@Test
 	void reportsCatalogUnavailableWithoutCallingSupplier() {
-		when(mappingReader.findAllActive())
+		when(mappingReader.findAllActive(anyLong()))
 			.thenReturn(List.of());
 		SupplierSearchClient client = mock(SupplierSearchClient.class);
 		when(client.supplier()).thenReturn(Supplier.SUPPLIER_A);
@@ -245,7 +249,7 @@ class IntegratedSearchServiceTests {
 
 	@Test
 	void marksRejectedSupplierItemsAsPartialWithoutTreatingSoldOutAsFailure() {
-		when(mappingReader.findAllActive())
+		when(mappingReader.findAllActive(anyLong()))
 			.thenReturn(mappings(Supplier.SUPPLIER_A, 1, 1));
 		SupplierSearchClient client = client(
 			Supplier.SUPPLIER_A,
@@ -273,12 +277,55 @@ class IntegratedSearchServiceTests {
 		});
 	}
 
+	@ParameterizedTest
+	@EnumSource(CatalogReadException.Reason.class)
+	void reportsDatabaseFailureWithoutCallingSuppliers(CatalogReadException.Reason reason) {
+		when(mappingReader.findAllActive(anyLong())).thenThrow(new CatalogReadException(reason));
+		AtomicInteger calls = new AtomicInteger();
+		List<SupplierSearchClient> clients = List.of(
+			client(Supplier.SUPPLIER_A, request -> {
+				calls.incrementAndGet();
+				return Mono.just(success(request.supplier()));
+			}),
+			client(Supplier.SUPPLIER_B, request -> {
+				calls.incrementAndGet();
+				return Mono.just(success(request.supplier()));
+			})
+		);
+
+		IntegratedSearchResult result = service(clients, Duration.ofSeconds(1), 4).search(CRITERIA);
+
+		assertThat(result.status()).isEqualTo(SearchStatus.FAILED);
+		assertThat(result.supplierResults()).hasSize(2).allSatisfy(outcome -> {
+			assertThat(outcome.status()).isEqualTo(SupplierSearchStatus.FAILED);
+			assertThat(outcome.failureTypes()).containsExactly(SupplierFailureType.CATALOG_UNAVAILABLE);
+		});
+		assertThat(calls).hasValue(0);
+		assertThat(resourceFixture.registry.get("search.catalog.read.failures")
+			.tag("reason", reason.name()).counter().count()).isEqualTo(1);
+		assertThat(resourceFixture.registry.get("search.requests")
+			.tag("outcome", "FAILED").timer().count()).isEqualTo(1);
+	}
+
+	@Test
+	void preservesUnexpectedDatabaseErrorsAsInternalFailures() {
+		var bug = new IllegalStateException("unexpected database adapter bug");
+		when(mappingReader.findAllActive(anyLong())).thenThrow(bug);
+		var source = client(Supplier.SUPPLIER_A, request -> Mono.just(success(request.supplier())));
+
+		assertThatThrownBy(() -> service(List.of(source), Duration.ofSeconds(1), 4).search(CRITERIA))
+			.isSameAs(bug);
+		assertThat(resourceFixture.registry.find("search.catalog.read.failures").counters()).isEmpty();
+		assertThat(resourceFixture.registry.get("search.requests")
+			.tag("outcome", "INTERNAL_ERROR").timer().count()).isEqualTo(1);
+	}
+
 	@Test
 	void treatsNormalEmptyResultAsSuccessBesideFailedSupplier() {
 		List<ActiveCatalogMapping> rows = new ArrayList<>();
 		rows.addAll(mappings(Supplier.SUPPLIER_A, 1, 1));
 		rows.addAll(mappings(Supplier.SUPPLIER_B, 1, 100));
-		when(mappingReader.findAllActive()).thenReturn(rows);
+		when(mappingReader.findAllActive(anyLong())).thenReturn(rows);
 		IntegratedSearchService service = service(
 			List.of(
 				client(
@@ -314,7 +361,7 @@ class IntegratedSearchServiceTests {
 		List<ActiveCatalogMapping> rows = new ArrayList<>();
 		rows.addAll(mappings(Supplier.SUPPLIER_A, 1, 1));
 		rows.addAll(mappings(Supplier.SUPPLIER_B, 1, 100));
-		when(mappingReader.findAllActive()).thenReturn(rows);
+		when(mappingReader.findAllActive(anyLong())).thenReturn(rows);
 		Function<SupplierSearchRequest, Mono<SupplierSearchResult>> failure = request ->
 			Mono.error(failure(
 				request.supplier(),
@@ -357,7 +404,7 @@ class IntegratedSearchServiceTests {
 		List<ActiveCatalogMapping> rows = new ArrayList<>();
 		rows.addAll(mappings(Supplier.SUPPLIER_A, 1, 1));
 		rows.addAll(mappings(Supplier.SUPPLIER_B, 1, 100));
-		when(mappingReader.findAllActive()).thenReturn(rows);
+		when(mappingReader.findAllActive(anyLong())).thenReturn(rows);
 		AtomicBoolean supplierBCalled = new AtomicBoolean();
 		SupplierSearchClient supplierAClient = client(
 			Supplier.SUPPLIER_A,
@@ -388,7 +435,7 @@ class IntegratedSearchServiceTests {
 	void distinguishesInternalFailureAndPreservesHealthyOffers() {
 		List<ActiveCatalogMapping> rows = new ArrayList<>(mappings(Supplier.SUPPLIER_A, 1, 1));
 		rows.addAll(mappings(Supplier.SUPPLIER_B, 1, 2));
-		when(mappingReader.findAllActive()).thenReturn(rows);
+		when(mappingReader.findAllActive(anyLong())).thenReturn(rows);
 		Offer healthy = offer(Supplier.SUPPLIER_B, 2, 20);
 		var service = service(List.of(
 			client(Supplier.SUPPLIER_A, request -> { throw new NullPointerException("adapter bug"); }),

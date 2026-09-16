@@ -105,7 +105,7 @@ curl -X POST 'http://localhost:18080/control/b/mode?value=normal'
 ./gradlew test
 ```
 
-2026-09-16의 8-B 검증 결과는 메인 232개·Mock 6개 통과이며 실패·오류·건너뜀은 없습니다. parameterized test의 각 입력 사례를 포함한 실행 건수입니다. 변경과 검증 기록은 [JOURNAL](JOURNAL.md), 감사 당시 검증과 한계는 [구조 감사](docs/structure-audit.md)에 있습니다.
+2026-09-16의 8-C 검증 결과는 메인 270개·Mock 6개 통과이며 실패·오류·건너뜀은 없습니다. 최종 실행에서 메인은 전부 실행했고 변경 없는 Mock은 기존 성공 결과를 재사용했습니다. parameterized test의 각 입력 사례를 포함한 실행 건수입니다. 변경과 검증 기록은 [JOURNAL](JOURNAL.md), 감사 당시 검증과 한계는 [구조 감사](docs/structure-audit.md)에 있습니다.
 
 실행 중인 두 `bootRun`은 각각 Ctrl+C로 종료합니다. DB 종료 명령은 다음과 같으며 데이터 볼륨은 유지됩니다.
 
@@ -129,13 +129,14 @@ docker compose down
 
 ## 다음 작업과 기술 선택
 
-8-A 입력/예외 계약과 리뷰 보완, 8-B 전역 호출 제한·응답 크기·업무 지표를 완료했습니다.
+8-A 입력/예외 계약, 8-B 자원 제한·업무 지표, 8-C 동기화 보호·DB 시간 예산을 완료했습니다.
 
-1. **8-C:** 동기화 동시 실행 지원 범위와 DB 시간 예산
-2. **8-D:** 실제 DB·Mock·고객 API 전체 연결 검증
-3. **9단계:** 실행 절차 재검증과 최종 설계·운영 한계 문서화
+1. **8-D:** 실제 DB·Mock·고객 API 전체 연결 검증
+2. **9단계:** 실행 절차 재검증과 최종 설계·운영 한계 문서화
 
 요청당 Supplier 동시 호출은 4개이며, JVM 전체에서 Supplier별 검색 8개·카탈로그 1개로 추가 제한합니다. 한도를 넘으면 대기열 없이 `CAPACITY_EXCEEDED`로 분류하고 정상 Supplier 결과는 유지합니다. 응답 한도는 검색 2 MiB·카탈로그 8 MiB이며 초과하면 `RESPONSE_TOO_LARGE`입니다. 설정과 검증 범위는 [설계 §17](docs/architecture-decisions.md#17-8-b-자원-제한과-업무-지표)을 참고하세요. 감사 보고서의 본문은 감사 시점 기록이며, 수정 상태는 각 문서 상단 안내와 구현 진행표로 구분합니다.
+
+카탈로그 동기화는 한 인스턴스에서 실행하며, 같은 Supplier의 조회·재시도·저장이 진행 중이면 중복 실행을 건너뜁니다. 여러 서버에서는 나머지 서버의 스케줄을 `SUPPLIER_CATALOG_ENABLED=false`로 끄고 수동 동기화도 실행하지 않아야 합니다. 검색 DB 조회는 남은 요청 예산과 기본 1초 SQL·300ms 잠금 한도를 적용하고, 연결 획득은 기본 500ms로 제한합니다. DB 자원 실패는 Supplier 호출 없이 `CATALOG_UNAVAILABLE` / HTTP 503으로 반환합니다. 연결·통신·응답 조립을 포함하는 엄격한 5초 완료 상한은 아니며, 쓰기에는 별도 예산을 둡니다. [설계 §18](docs/architecture-decisions.md#18-8-c-동기화-중복-실행과-db-시간-예산)에 지원 범위와 설정을 정리했습니다.
 
 SpringDoc/Swagger는 아직 도입하지 않았습니다. 공개 검색 endpoint가 하나인 현재는 위 요청 예시를 제공하고, 응답 계약 안정화 후 자동 문서 추가를 검토합니다. Resilience4j도 아직 사용하지 않습니다. 카탈로그는 Reactor의 제한 retry를 사용하고, 검색은 추가 retry 없이 timeout과 부분 결과를 사용합니다. 전역 허용량과 지표를 바탕으로 반복 장애 양상을 확인한 뒤 circuit breaker 도입을 판단합니다.
 

@@ -103,6 +103,14 @@ public class SupplierMetrics {
 			.record(System.nanoTime() - started, TimeUnit.NANOSECONDS);
 	}
 
+	public void catalogReadFailed(String reason) {
+		registry.counter("search.catalog.read.failures", "reason", reason).increment();
+	}
+
+	public void catalogSkipped(Supplier supplier) {
+		registry.counter("supplier.catalog.skipped", "supplier", supplier.name()).increment();
+	}
+
 	public <T> T stage(String stage, java.util.function.Supplier<T> action) {
 		long started = System.nanoTime();
 		try {

@@ -24,15 +24,16 @@ import reactor.core.publisher.Mono;
 
 import com.supplierhub.catalog.application.ActiveCatalogMapping;
 import com.supplierhub.catalog.application.ActiveCatalogMappingReader;
+import com.supplierhub.catalog.application.CatalogReadException;
 import com.supplierhub.catalog.domain.Supplier;
 import com.supplierhub.search.domain.Offer;
 import com.supplierhub.search.domain.SearchCriteria;
 import com.supplierhub.supplier.common.SupplierCallResources;
-import com.supplierhub.supplier.common.SupplierMetrics;
-import com.supplierhub.supplier.common.SupplierOperation;
 import com.supplierhub.supplier.common.SupplierFailureType;
 import com.supplierhub.supplier.common.SupplierIntegrationException;
 import com.supplierhub.supplier.common.SupplierIntegrationProperties;
+import com.supplierhub.supplier.common.SupplierMetrics;
+import com.supplierhub.supplier.common.SupplierOperation;
 import com.supplierhub.supplier.common.SupplierSearchClient;
 import com.supplierhub.supplier.common.SupplierSearchRequest;
 import com.supplierhub.supplier.common.SupplierSearchRequest.PropertyMapping;
@@ -102,7 +103,21 @@ public class IntegratedSearchService {
 	}
 
 	private IntegratedSearchResult search(SearchCriteria criteria, long startedAt) {
-		List<ActiveCatalogMapping> rows = metrics.stage("DATABASE", mappingReader::findAllActive);
+		List<ActiveCatalogMapping> rows;
+		try {
+			rows = metrics.stage("DATABASE", () -> mappingReader.findAllActive(
+				startedAt + overallTimeout.toNanos()
+			));
+		} catch (CatalogReadException exception) {
+			metrics.catalogReadFailed(exception.reason().name());
+			log.warn("Active catalog read failed: reason={}", exception.reason(), exception);
+			return new IntegratedSearchResult(SearchStatus.FAILED, clients.stream()
+				.map(client -> new SupplierSearchOutcome(
+					client.supplier(), SupplierSearchStatus.FAILED, List.of(), 0, 0,
+					List.of(SupplierFailureType.CATALOG_UNAVAILABLE)
+				))
+				.toList());
+		}
 		Map<Supplier, List<PropertyMapping>> mappings = metrics.stage("MAPPING", () -> groupMappings(rows));
 		List<SupplierSearchPlan> plans = clients.stream()
 			.map(client -> plan(client, criteria, mappings.getOrDefault(

@@ -441,11 +441,11 @@ Supplier 요청을 만들기 위해 활성 매핑 전체를 읽는 것은 최소
 
 일부 묶음이 실패해도 완료된 묶음의 Offer는 유지한다. 정상 결과가 하나라도 있고 일부가 실패하면 해당 Supplier와 전체 검색을 `PARTIAL`로 표시한다.
 
-전체 제한 시간은 활성 매핑 조회를 시작하기 직전부터 계산한다. 제한 시간이 끝나면 실행 중이거나 대기 중인 reactive 호출을 취소하고, 이미 완료된 묶음은 보존하며 완료되지 않은 묶음은 `TIMEOUT`으로 집계한다. JPA 조회 자체는 blocking 호출이므로 데이터베이스 수준의 statement timeout과 bulkhead는 운영 지표를 바탕으로 8단계에서 보완한다.
+전체 제한 시간은 활성 매핑 조회를 시작하기 직전부터 계산한다. 제한 시간이 끝나면 실행 중이거나 대기 중인 reactive 호출을 취소하고, 이미 완료된 묶음은 보존하며 완료되지 않은 묶음은 `TIMEOUT`으로 집계한다. JPA 조회 자체는 blocking 호출이므로 8-C에서 연결 획득 대기와 PostgreSQL statement/lock timeout을 유한하게 설정하고 남은 검색 예산을 전달했다(§18). 고객 진입 제한과 응답 직렬화를 포함하는 엄격한 HTTP 완료 상한은 별도 경계로 남긴다.
 
 #### 수천 개 숙소에서의 한계
 
-현재 설정에서 Supplier당 숙소 3,000개는 50개씩 60묶음이며, 동시 호출 4개라면 15번의 호출 wave가 필요하다. 묶음당 200ms이면 약 3초지만 p95가 1초이면 약 15초가 필요해 검색 전체 제한 시간 5초 안에 전부 완료할 수 없다. 이 경우 전체 제한 시간은 지키되, 완료된 묶음만 보존하고 나머지는 취소하여 `PARTIAL` 또는 `FAILED`로 반환한다.
+현재 설정에서 Supplier당 숙소 3,000개는 50개씩 60묶음이며, 동시 호출 4개라면 15번의 호출 wave가 필요하다. 묶음당 200ms이면 약 3초지만 p95가 1초이면 약 15초가 필요해 검색 전체 제한 시간 5초 안에 전부 완료할 수 없다. 이 경우 Supplier 호출은 남은 검색 예산에서 취소하고, 완료된 묶음만 보존하여 `PARTIAL` 또는 `FAILED`로 반환한다.
 
 따라서 현재 구조는 호출 수를 제한하여 안전하게 실패하지만, 모든 수천 개 숙소를 항상 5초 안에 조회한다고 보장하지 않는다. 운영 지표와 Supplier 호출 한도를 확인한 뒤 다음 순서로 확장한다.
 
@@ -641,7 +641,7 @@ JSON 타입 검사와 외부 값의 도메인 검증은 `InvalidValueException`�
 - 연결 풀의 pending 한도는 허용량 반환과 실제 연결 반환 사이의 짧은 경계 및 직접 client 사용을 위한 추가 보호다. 로컬 연결 획득 대기 초과·대기열 초과는 원인 체인을 확인해 `CAPACITY_EXCEEDED`로 분류한다. Reactor Netty 1.3.x의 shaded pool 예외 의존은 transport mapper 한곳에 둔다.
 - HTTP client의 연결 reset 자동 재전송을 끈다. 검색은 재시도하지 않는다. 카탈로그의 기존 제한 retry만 유지하며 각 시도마다 허용량을 다시 얻는다. 크기 초과와 로컬 용량 부족은 즉시 retry하지 않는다.
 
-로컬 용량 부족의 `retryable=false`는 현재 점유 중인 작업에 재시도를 더해 경합을 늘리지 않기 위한 선택이다. 카탈로그에서는 이미 진행 중인 동기화가 성공해 매핑을 갱신할 수도 있으므로, 용량 부족이 곧 다음 주기까지 갱신 불가를 뜻하지는 않는다. 다만 현재 허용량은 HTTP 조회가 끝나면 반환되고 DB 저장까지 보호하지 않는다. 8-C에서 조회→저장 전체의 중복 실행·저장 순서 정책을 정하며 이 선택을 함께 검토한다. `execute`의 retry 여부 한 곳만 바꿔서는 DB 경쟁이나 연결 풀의 용량 부족 분류가 해결되지 않는다.
+로컬 용량 부족의 `retryable=false`는 현재 점유 중인 작업에 재시도를 더해 경합을 늘리지 않기 위한 선택이다. 카탈로그에서는 이미 진행 중인 동기화가 성공해 매핑을 갱신할 수도 있으므로, 용량 부족이 곧 다음 주기까지 갱신 불가를 뜻하지는 않는다. HTTP 허용량은 조회가 끝나면 반환되므로 DB 저장까지 보호하지 않는다. 8-C에서는 별도의 Supplier별 실행 guard로 조회→재시도→저장 전체를 보호하고, 중복 실행은 건너뛰도록 정했다(§18). 로컬 용량 부족은 즉시 retry하지 않는 선택을 유지한다. `execute`의 retry 여부 한 곳만 바꿔서는 DB 경쟁이나 연결 풀의 용량 부족 분류가 해결되지 않는다.
 
 8-B에서는 검색·카탈로그 application이 구체 클래스 `SupplierCallResources`와 `SupplierMetrics`에 의존한다. 호출 제한과 Reactor Netty 연결 풀 관리가 한 클래스에 있어 application 테스트도 풀 객체와 Micrometer `MeterRegistry`를 생성한다. application이 Micrometer를 직접 import하지는 않지만, 구체 지표 구현과 자원 구성에 대한 결합은 남는다. 자원 수명과 지표 기록을 한곳에서 관리하는 작은 구현을 택한 절충이며 application이 포트만 의존하는 구조는 아니다. 호출 제한 정책을 독립적으로 교체하거나 application 테스트의 transport 의존을 없앨 필요가 생기면 좁은 호출 실행 인터페이스와 연결 풀 소유자를 분리한다. `supplier/common` 전체 재편은 이 변경의 필수 조건으로 삼지 않는다.
 
@@ -670,6 +670,8 @@ Actuator HTTP 노출은 `health`, `info`, `metrics`다. 대시보드·외부 tra
 | `supplier.search.failures` | 검색 요청별 Supplier에 발생한 실패 유형. 같은 유형은 요청 내 한 번 |
 | `search.requests` | 검색 서비스 전체 시간·최종 상태. 내부 오류도 별도 기록 |
 | `search.stages` | DATABASE/MAPPING/SUPPLIERS/ASSEMBLY 구간 시간 |
+| `search.catalog.read.failures` | 8-C: 예상된 DB 읽기 실패. TIMEOUT/UNAVAILABLE 원인 |
+| `supplier.catalog.skipped` | 8-C: 동일 Supplier 동기화가 진행 중이어서 건너뛴 실행 |
 | `supplier.catalog.sync` | HTTP 시도·retry·저장까지 포함하는 Supplier별 동기화 시간·결과 |
 | `supplier.catalog.last.success` | 저장 성공 후 기록한 epoch seconds. 이 프로세스에서 성공한 적이 없으면 0 |
 | `supplier.catalog.consecutive.failures` | 연속 동기화 실패 횟수. 저장 성공 시 0으로 초기화 |
@@ -694,6 +696,49 @@ Actuator HTTP 노출은 `health`, `info`, `metrics`다. 대시보드·외부 tra
 
 메인 232개·Mock 6개 통과, 실패·오류·건너뜀 0개다. 변경 없는 Mock은 최종 실행에서 up-to-date였으며 이 세션의 리뷰 보완 전체 실행에서 6개 성공을 확인했다.
 
-이 한도는 JVM·Supplier·작업별 외부 호출 보호다. DB 조회 이전의 고객 검색 진입 제한, 다중 JVM 합산 한도, 고객 연결 종료의 즉시 취소, 최종 응답 직렬화 비용은 해결하지 않았다. 카탈로그 허용량은 HTTP 시도에 적용되며 snapshot 저장까지 직렬화하는 DB lock을 대체하지 않는다. DB 동시 실행 정책·DB/pool 시간 예산은 8-C에 남는다. 전체 5초는 아직 HTTP 응답 완료까지의 엄격한 상한이 아니다.
+이 한도는 JVM·Supplier·작업별 외부 호출 보호다. DB 조회 이전의 고객 검색 진입 제한, 다중 JVM 합산 한도, 고객 연결 종료의 즉시 취소, 최종 응답 직렬화 비용은 해결하지 않았다. 카탈로그 허용량은 HTTP 시도에 적용되며 snapshot 저장까지 직렬화하는 DB lock을 대체하지 않는다. 8-C에서 별도 동기화 guard와 DB/pool 시간 예산을 추가했다(§18). 전체 5초는 HTTP 응답 완료까지의 엄격한 상한이 아니다.
 
 실제 DB→별도 Mock 프로세스→고객 API의 최종 연결 검증과 실행 명령 재현은 각각 8-D와 9단계에서 수행한다. 캐시, circuit breaker, 분산 제한, 전체 WebFlux 전환은 이번 범위에 추가하지 않았다.
+
+
+## 18. 8-C 동기화 중복 실행과 DB 시간 예산
+
+### 18.1 지원하는 실행 범위
+
+카탈로그를 갱신하는 애플리케이션 인스턴스는 하나로 제한한다. 여러 서버를 띄운다면 나머지는 `SUPPLIER_CATALOG_ENABLED=false`로 스케줄을 끄고 수동 동기화도 실행하지 않아야 한다. 자동 leader 선출이나 분산 lock은 구현하지 않았다.
+
+한 인스턴스의 `CatalogSynchronizationService`는 Supplier별 원자적 guard를 HTTP 조회 전에 획득한다. 모든 HTTP 시도와 retry backoff, snapshot 저장의 commit/rollback이 끝날 때까지 유지하며 `finally`에서 반환한다. 같은 Supplier의 중복 실행은 대기하거나 새 snapshot을 가져오지 않고 건너뛰며 다음 Supplier를 진행한다. 이 범위에서 최초 INSERT 경쟁, 누락 횟수 lost update, 먼저 가져온 snapshot의 나중 저장을 예방한다. Supplier가 직렬 요청에 오래된 데이터를 돌려주는 문제까지 판별하는 version 계약은 없다.
+
+서비스 진입은 `Propagation.NEVER`로 외부 트랜잭션 안의 실행을 거부한다. 따라서 HTTP 중에는 DB 트랜잭션을 유지하지 않고, writer의 프록시가 독립 트랜잭션을 끝낸 뒤 guard를 해제한다. `CatalogSnapshotWriter` 직접 호출은 동기화 진입 API가 아니며 guard를 제공하지 않는다.
+
+`CAPACITY_EXCEEDED`의 즉시 재시도 금지는 유지한다. 중복 동기화는 HTTP 허용량을 경쟁하기 전에 건너뛰고, 실제 pool 용량 부족은 기존 실패로 관측한다. 건너뛴 실행은 `supplier.catalog.skipped{supplier}`만 증가시키며 동기화 실패 횟수나 마지막 성공 시각은 바꾸지 않는다. 진행 중인 작업이 성공한 뒤에만 신선도가 갱신된다.
+
+### 18.2 검색과 쓰기의 서로 다른 시간 예산
+
+| 설정 | 초기값 | 적용 범위 |
+| --- | ---: | --- |
+| Hikari maximum-pool-size | 10 | 검색·쓰기의 공유 DB 연결 수 |
+| Hikari connection-timeout / validation-timeout | 500ms / 250ms | 연결 획득·유효성 검사 |
+| pgJDBC connectTimeout / socketTimeout | 2초 / 15초 | 연결 수립·각 socket 읽기 |
+| PostgreSQL session statement_timeout / lock_timeout | 10초 / 2초 | 쓰기 등 기본 SQL / 잠금 대기 |
+| catalog.database.read-statement-timeout | 1초 | 검색 projection SQL |
+| catalog.database.read-lock-timeout | 300ms | 검색 SQL의 잠금 대기 |
+| catalog.database.write-transaction-timeout-seconds | 10초 | Spring/Hibernate 쓰기 트랜잭션 |
+
+검색 시작의 `System.nanoTime()`으로 만든 절대 deadline을 조회 포트에 전달한다. reader는 독립된 `readOnly` 트랜잭션에서 연결을 확보한 뒤 남은 시간을 계산한다. PostgreSQL `set_config(..., true)`로 statement timeout은 `min(읽기 한도, 잔여 시간)`, lock timeout은 `min(잠금 한도, statement 한도)`로 설정한다. 예산이 소진되면 SQL을 실행하지 않고, 양수의 1ms 미만 시간은 1ms로 올려 timeout이 0으로 비활성화되지 않게 한다. 조회와 트랜잭션 종료 뒤에도 deadline을 확인한다. `JdbcTemplate`은 JPA와 같은 DataSource/트랜잭션 연결을 사용한다. [Spring JpaTransactionManager](https://docs.spring.io/spring-framework/docs/current/javadoc-api/org/springframework/orm/jpa/JpaTransactionManager.html)
+
+검색용 설정은 트랜잭션이 끝나면 원래 session 값으로 돌아간다. 쓰기는 검색의 짧은 timeout을 물려받지 않으며 별도의 Spring 트랜잭션 timeout과 유한한 PostgreSQL 기본 한도를 사용한다. statement timeout은 각 SQL의 제한이므로 전체 저장 시간과 같은 의미가 아니다. [PostgreSQL timeout](https://www.postgresql.org/docs/17/runtime-config-client.html)
+
+이 값은 부하 실측으로 정한 처리 용량이 아니다. Hikari의 고정 획득 대기는 요청별로 줄일 수 없고 최소값도 250ms다. 매우 짧은 검색 예산에서는 연결 대기만으로 deadline을 넘길 수 있다. 설정 SQL 자체와 통신 장애는 별도 JDBC 한도에 의존하고, socketTimeout도 전체 요청 상한이 아니다. CPU 매핑·응답 조립·직렬화까지 포함한 5초 hard deadline을 보장한다고 표현하지 않는다. [HikariCP 설정](https://github.com/brettwooldridge/HikariCP#configuration-knobs-baby), [pgJDBC 설정](https://jdbc.postgresql.org/documentation/use/)
+
+### 18.3 실패와 고객 응답
+
+reader는 트랜잭션 시작·조회·종료 전체 바깥에서 예상된 자원 실패만 `CatalogReadException`으로 변환한다. SQL timeout/취소, lock timeout, deadline 소진은 TIMEOUT이고 연결 확보 실패·연결 단절은 UNAVAILABLE이다. SQL 문법·무결성·미분류 프로그래밍 오류는 내부 오류로 남긴다. PostgreSQL SQLState로 판별하며 메시지 문자열에 의존하지 않는다.
+
+이 두 예상 실패에는 Supplier HTTP를 시작하지 않고 모든 활성 Supplier에 `CATALOG_UNAVAILABLE`을 기록하여 기존 HTTP 503 / FAILED 계약을 사용한다. 고객 응답에는 DB 메시지나 SQL을 넣지 않는다. `search.catalog.read.failures{reason=TIMEOUT|UNAVAILABLE}`로 원인을 구분하고 검색 전체 FAILED·DATABASE 구간 시간·Supplier 실패 지표도 기록한다. HTTP 응답 enum은 추가하지 않았다.
+
+### 18.4 검증과 남은 범위
+
+실제 PostgreSQL에서 조회 잠금·느린 SQL·연결 부족과 실패 후 회복, 트랜잭션 범위의 timeout 설정 복원을 검증한다. 독립 commit 이후 누락·비활성·재등장에서 ID를 유지하고, 실제 중간 쓰기 실패의 rollback과 Supplier별 독립 반영을 확인한다. 동기화 guard는 조회·retry backoff·저장 대기 중 중복 호출과 실패 후 반환을 검증한다. 구체 테스트와 최종 실행 결과는 JOURNAL에 남긴다.
+
+기존 단일 projection과 인덱스를 유지한다. DB 감사에서 확인한 query 수에 근거해 N+1 수정이나 근거 없는 인덱스·batch/upsert 전환을 추가하지 않았다. 다중 동기화 인스턴스, 고객 검색 진입 제한, 데이터 버전, 생산 환경 부하 시험은 별도 확장 범위다. DB·별도 Mock·고객 HTTP 전체 연결은 8-D에서 검증한다.

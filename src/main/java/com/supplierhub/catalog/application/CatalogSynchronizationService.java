@@ -2,28 +2,32 @@ package com.supplierhub.catalog.application;
 
 import java.time.Duration;
 import java.util.Comparator;
+import java.util.EnumMap;
 import java.util.EnumSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
-
-import reactor.core.publisher.Mono;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
+import org.springframework.transaction.annotation.Transactional;
 
+import reactor.core.publisher.Mono;
 import reactor.util.retry.Retry;
 
 import com.supplierhub.catalog.domain.CatalogSnapshot;
 import com.supplierhub.catalog.domain.Supplier;
 import com.supplierhub.supplier.common.SupplierCallResources;
-import com.supplierhub.supplier.common.SupplierMetrics;
-import com.supplierhub.supplier.common.SupplierOperation;
 import com.supplierhub.supplier.common.SupplierCatalogClient;
 import com.supplierhub.supplier.common.SupplierFailureType;
 import com.supplierhub.supplier.common.SupplierIntegrationException;
 import com.supplierhub.supplier.common.SupplierIntegrationProperties;
+import com.supplierhub.supplier.common.SupplierMetrics;
+import com.supplierhub.supplier.common.SupplierOperation;
 import com.supplierhub.supplier.common.SupplierTransportFailureMapper;
 
 @Service
@@ -40,6 +44,7 @@ public class CatalogSynchronizationService {
 	private final Duration retryBackoff;
 	private final SupplierCallResources resources;
 	private final SupplierMetrics metrics;
+	private final Map<Supplier, AtomicBoolean> running = new EnumMap<>(Supplier.class);
 
 	public CatalogSynchronizationService(
 		List<SupplierCatalogClient> clients,
@@ -59,8 +64,12 @@ public class CatalogSynchronizationService {
 		this.retryBackoff = properties.catalog().retryBackoff();
 		this.resources = resources;
 		this.metrics = metrics;
+		for (Supplier supplier : Supplier.values()) {
+			running.put(supplier, new AtomicBoolean());
+		}
 	}
 
+	@Transactional(propagation = Propagation.NEVER)
 	public void synchronizeAll() {
 		for (SupplierCatalogClient client : clients) {
 			synchronize(client);
@@ -68,6 +77,21 @@ public class CatalogSynchronizationService {
 	}
 
 	private void synchronize(SupplierCatalogClient client) {
+		AtomicBoolean guard = running.get(client.supplier());
+		if (!guard.compareAndSet(false, true)) {
+			metrics.catalogSkipped(client.supplier());
+			log.info("Supplier catalog synchronization skipped: supplier={}, reason=ALREADY_RUNNING",
+				client.supplier());
+			return;
+		}
+		try {
+			synchronizeGuarded(client);
+		} finally {
+			guard.set(false);
+		}
+	}
+
+	private void synchronizeGuarded(SupplierCatalogClient client) {
 		long started = System.nanoTime();
 		SupplierFailureType failure = SupplierFailureType.INTERNAL_ERROR;
 		try {

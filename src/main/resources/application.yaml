@@ -12,6 +12,14 @@ spring:
     url: ${DB_URL:jdbc:postgresql://localhost:5432/supplier_hub}
     username: ${DB_USERNAME:supplier_hub}
     password: ${DB_PASSWORD:}
+    hikari:
+      maximum-pool-size: ${DB_POOL_SIZE:10}
+      connection-timeout: ${DB_ACQUIRE_TIMEOUT_MS:500}
+      validation-timeout: ${DB_VALIDATION_TIMEOUT_MS:250}
+      data-source-properties:
+        connectTimeout: ${DB_CONNECT_TIMEOUT_SECONDS:2}
+        socketTimeout: ${DB_SOCKET_TIMEOUT_SECONDS:15}
+        options: "-c statement_timeout=${DB_STATEMENT_TIMEOUT_MS:10000} -c lock_timeout=${DB_LOCK_TIMEOUT_MS:2000}"
 
   jpa:
     hibernate:
@@ -26,6 +34,12 @@ spring:
 
 server:
   shutdown: graceful
+
+catalog:
+  database:
+    read-statement-timeout: ${CATALOG_DB_READ_STATEMENT_TIMEOUT:1s}
+    read-lock-timeout: ${CATALOG_DB_READ_LOCK_TIMEOUT:300ms}
+    write-transaction-timeout-seconds: ${CATALOG_DB_WRITE_TRANSACTION_TIMEOUT_SECONDS:10}
 
 management:
   endpoints:

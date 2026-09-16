@@ -43,7 +43,7 @@ public class CatalogSnapshotWriter implements CatalogSnapshotStore {
 	}
 
 	@Override
-	@Transactional
+	@Transactional(timeoutString = "${catalog.database.write-transaction-timeout-seconds:10}")
 	public CatalogSnapshotUpdate replace(CatalogSnapshot snapshot) {
 		CatalogChangeSummary changes = new CatalogChangeSummary();
 		List<Property> existingPropertyList =

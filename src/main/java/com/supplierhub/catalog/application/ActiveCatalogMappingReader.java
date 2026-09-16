@@ -4,6 +4,6 @@ import java.util.List;
 
 public interface ActiveCatalogMappingReader {
 
-	List<ActiveCatalogMapping> findAllActive();
+	List<ActiveCatalogMapping> findAllActive(long deadlineNanos);
 
 }

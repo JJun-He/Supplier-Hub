@@ -684,3 +684,26 @@ AI를 사용해 도메인 경계, API 응답 구조, 내부 식별자, 실패 �
 - application과 구체 자원·지표 구현의 결합을 설계의 절충으로 기록했다. 구조 감사 표는 감사 당시 사실을 보존하도록 제목을 정리했다.
 - 카탈로그 용량 부족의 retry 여부는 한 줄만 바꾸지 않고 8-C의 조회부터 저장까지 중복 정책과 함께 결정한다. last.success=0은 기동 유예와 최초 성공 없음 감시를 나눠 해석하도록 설명했다.
 - SupplierResourceProperties의 import와 줄바꿈만 정리했다. 제품 동작은 바꾸지 않았고 diff 공백 검사를 통과했다. AI가 리뷰 내용을 코드와 대조하고 문서·스타일을 수정했다.
+
+
+## 2026-09-16 - 8-C 동기화 중복 보호·DB 예산
+
+### 변경과 결정
+
+- 지원 범위를 하나의 카탈로그 동기화 인스턴스로 명시했다. Supplier별 guard를 fetch 이전부터 retry backoff와 저장 commit/rollback 이후까지 유지하고, 중복은 대기나 추가 fetch 없이 건너뛴다. 다른 Supplier는 계속 처리한다. 다중 서버의 나머지 인스턴스는 스케줄과 수동 동기화를 끈다.
+- 동기화 서비스 진입을 Propagation.NEVER로 제한해 외부 트랜잭션 합류를 거부한다. HTTP 중에는 DB 트랜잭션을 열지 않고 writer proxy가 저장을 끝낸 뒤 guard를 반환한다. writer 직접 호출에는 guard가 없다는 경계도 기록했다.
+- 카탈로그 CAPACITY_EXCEEDED는 retryable=false를 유지한다. 중복 실행은 별도 skipped 지표로만 기록하고 마지막 성공·연속 실패를 바꾸지 않는다.
+- 검색 시작의 monotonic deadline을 reader에 전달한다. 독립 readOnly TransactionTemplate 바깥에서 begin/조회/종료 실패를 분류하고, 연결 획득 뒤 남은 예산으로 PostgreSQL transaction-local statement/lock timeout을 설정한다. deadline 소진과 0ms timeout 비활성화를 방어하며 늦은 조회 결과도 거부한다.
+- Hikari 연결 획득 500ms·검증 250ms와 PostgreSQL/JDBC의 유한한 기본 한도를 설정했다. 읽기 SQL 1초·잠금 300ms, 쓰기 Spring 트랜잭션 10초를 분리했다. 각 SQL·socket의 제한을 전체 HTTP 완료 상한으로 표현하지 않는다.
+- 예상된 읽기 실패는 TIMEOUT/UNAVAILABLE 내부 지표로 구분하며 고객에게는 기존 CATALOG_UNAVAILABLE / HTTP 503을 반환한다. Supplier 검색은 시작하지 않는다. 문법·무결성·미분류 내부 오류는 숨기지 않는다.
+- 단일 projection과 현재 인덱스를 유지했다. 다중 writer, 데이터 version, 신규 분산 lock·batch/upsert는 추가하지 않았다. 설계 §18, README, 구현 진행표와 감사 문서의 후속 상태를 갱신했다.
+
+### 검증
+
+- CatalogSynchronizationConcurrencyTests 4개: 조회 대기·HTTP 허용량 반환 뒤 저장 대기·가상시간 retry backoff 중 중복을 건너뛰고, 실패 후 guard/허용량을 회복한다. 이전 신선도 보존과 다른 Supplier 진행도 확인했다.
+- CatalogCommitBoundaryTests 6개: 테스트 전체 트랜잭션 없이 실제 commit을 확인했다. 누락→비활성→재등장 ID 보존, 앞선 INSERT 이후 DB 길이 제약 실패의 전체 rollback, A rollback 동안 B 독립 commit, 미commit 변경 비노출, 외부 트랜잭션 동기화 거부, DB 행 잠금 실패 후 기존 데이터·연결 반환·정상 재실행을 검증했다. 마지막 사례는 PostgreSQL lock_timeout을 검증하며 Spring timeout 단독 효과를 분리한 검증은 아니다.
+- CatalogReadTimeoutIntegrationTests 6개: 실제 ACCESS EXCLUSIVE 잠금에서 reader→검색 서비스→controller를 거쳐 503/CATALOG_UNAVAILABLE과 Supplier 호출 0회를 확인했다. 실제 pg_sleep 취소, 한 연결 풀의 고갈·회복, 연결 획득 시간의 SQL 예산 차감, 성공·실패 후 session 설정 복귀, 늦은 결과 거부를 검증했다. controller는 직접 호출했고 실제 고객 HTTP 연결 E2E는 8-D에 남긴다.
+- reader 예외 분류·내부 오류 전파·만료 예산 17개, 읽기 설정 2개, 검색의 예상 DB 실패/내부 오류 구분 3개를 추가했다. 기존 사례와 합쳐 새 검증 38개다.
+- Java 21의 집중 테스트와 전체 `./gradlew test --offline --console=plain`을 실행했다. 최종 XML 집계는 **메인 270개·Mock 6개, 실패·오류·건너뜀 0개**다. 최종 전체 실행의 메인은 실제 실행했고 변경 없는 Mock은 up-to-date 결과를 재사용했다.
+- 단일 연결의 반환·설정 복구는 검증했지만, 외부 트랜잭션이 열린 상태에서 reader의 REQUIRES_NEW 중첩 동작은 별도 통합 검증하지 않았다. 현재 고객 검색은 외부 트랜잭션에서 시작하지 않는다.
+- AI가 설계·구현·독립 테스트·읽기 전용 리뷰를 나누어 작업하고 실제 PostgreSQL 전체 검증을 실행했다. PostgreSQL·pgJDBC·Spring·Hikari 공식 문서와 현재 로컬 라이브러리 동작을 대조했다. 다음 작업은 8-D, 이후 9단계다.

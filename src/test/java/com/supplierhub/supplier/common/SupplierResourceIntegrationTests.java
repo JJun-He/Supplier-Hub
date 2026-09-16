@@ -379,7 +379,7 @@ class SupplierResourceIntegrationTests {
 
 	private IntegratedSearchService service(Duration timeout) {
 		return new IntegratedSearchService(
-				() ->
+				deadlineNanos ->
 						List.of(
 								new ActiveCatalogMapping(
 										1, Supplier.SUPPLIER_A, "P0", "One", 1, "R0", "Room"),
