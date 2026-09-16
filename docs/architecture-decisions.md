@@ -630,12 +630,20 @@ JSON 타입 검사와 외부 값의 도메인 검증은 `InvalidValueException`�
 | 연결 획득 대기 시간 | 200ms | 200ms |
 | 응답 codec 한도 | 2 MiB | 8 MiB |
 
+검색 한도 8은 요청당 Supplier 동시 배치 4개를 기준으로 두 요청이 최대 병렬도를 사용하는 상황을 수용하도록 정한 초기값이다. 부하 측정으로 도출한 운영 용량이나 동시 고객 수 보장은 아니다. 세 요청이 각각 같은 Supplier의 배치 4개를 동시에 실행하면 일부 호출이 거부될 수 있지만, 실제 거부 여부는 숙소 수·배치 수·호출이 겹치는 시간에 달려 있다. 거부된 Supplier에 성공 배치가 없으면 해당 Supplier 결과는 FAILED, 성공 배치가 있으면 PARTIAL이 될 수 있다. `SupplierResourceIntegrationTests`는 한도를 2로 낮춰 격리와 반환을 검증하며 기본값 8의 처리 용량을 측정하지 않는다.
+
+운영 조정은 Supplier 계약상 호출 제한과 지연 분포, `supplier.calls.active`·CAPACITY_EXCEEDED 건수·연결 풀 pending·검색 완료 시간, heap 사용량을 함께 보고 결정한다. 대표 배치 수와 동시 요청 수를 사용한 부하 시험에서 Supplier와 애플리케이션의 여유를 확인한 뒤 한도를 바꾼다. 거부 건수만 보고 한도를 늘리면 연결·메모리 부담과 Supplier 지연이 함께 커질 수 있다.
+
 - 기본값은 `supplier.resources.search` / `supplier.resources.catalog`에서 바꾼다. 무제한을 뜻하는 음수·0을 허용하지 않는다. Supplier마다 독립된 자원이지만 현재 설정값은 A/B에 동일하게 적용한다.
 - 애플리케이션 허용량에는 대기열을 두지 않는다. 구독 시 `tryAcquire`로 즉시 수용하거나 `CAPACITY_EXCEEDED`로 거부한다. 이벤트 루프에서 blocking acquire를 호출하지 않는다. 짧은 폭주에서도 일부 결과가 빠질 수 있지만 대기 작업이 무한히 쌓이지 않는다. 공정한 고객별 할당을 보장하는 정책은 아니다.
 - `Mono.using`의 eager 정리로 정상·오류 신호가 다음 처리에 전달되기 전에 허용량을 반환한다. 구독 취소와 Publisher 생성 전 동기 예외도 반환 경로에 포함한다. 응답 읽기와 파싱·정규화가 완료될 때까지 허용량을 유지한다.
 - A/B와 검색/카탈로그의 ConnectionProvider를 분리한다. 같은 호스트 주소를 사용해도 검색이 다른 Supplier나 카탈로그의 연결을 점유하지 않는다. 컨텍스트 종료 시 소유한 풀을 정리한다.
 - 연결 풀의 pending 한도는 허용량 반환과 실제 연결 반환 사이의 짧은 경계 및 직접 client 사용을 위한 추가 보호다. 로컬 연결 획득 대기 초과·대기열 초과는 원인 체인을 확인해 `CAPACITY_EXCEEDED`로 분류한다. Reactor Netty 1.3.x의 shaded pool 예외 의존은 transport mapper 한곳에 둔다.
 - HTTP client의 연결 reset 자동 재전송을 끈다. 검색은 재시도하지 않는다. 카탈로그의 기존 제한 retry만 유지하며 각 시도마다 허용량을 다시 얻는다. 크기 초과와 로컬 용량 부족은 즉시 retry하지 않는다.
+
+로컬 용량 부족의 `retryable=false`는 현재 점유 중인 작업에 재시도를 더해 경합을 늘리지 않기 위한 선택이다. 카탈로그에서는 이미 진행 중인 동기화가 성공해 매핑을 갱신할 수도 있으므로, 용량 부족이 곧 다음 주기까지 갱신 불가를 뜻하지는 않는다. 다만 현재 허용량은 HTTP 조회가 끝나면 반환되고 DB 저장까지 보호하지 않는다. 8-C에서 조회→저장 전체의 중복 실행·저장 순서 정책을 정하며 이 선택을 함께 검토한다. `execute`의 retry 여부 한 곳만 바꿔서는 DB 경쟁이나 연결 풀의 용량 부족 분류가 해결되지 않는다.
+
+8-B에서는 검색·카탈로그 application이 구체 클래스 `SupplierCallResources`와 `SupplierMetrics`에 의존한다. 호출 제한과 Reactor Netty 연결 풀 관리가 한 클래스에 있어 application 테스트도 풀 객체와 Micrometer `MeterRegistry`를 생성한다. application이 Micrometer를 직접 import하지는 않지만, 구체 지표 구현과 자원 구성에 대한 결합은 남는다. 자원 수명과 지표 기록을 한곳에서 관리하는 작은 구현을 택한 절충이며 application이 포트만 의존하는 구조는 아니다. 호출 제한 정책을 독립적으로 교체하거나 application 테스트의 transport 의존을 없앨 필요가 생기면 좁은 호출 실행 인터페이스와 연결 풀 소유자를 분리한다. `supplier/common` 전체 재편은 이 변경의 필수 조건으로 삼지 않는다.
 
 풀 설정과 자원 생명주기는 [Reactor Netty 공식 문서](https://projectreactor.io/docs/netty/release/reference/http-client.html#_connection_pool)를 기준으로 현재 의존성의 실제 HTTP 동작을 검증했다.
 
@@ -671,6 +679,7 @@ Actuator HTTP 노출은 `health`, `info`, `metrics`다. 대시보드·외부 tra
 - 완전 중복은 `duplicateOfferCount`와 DUPLICATE 지표로 관측한다. 고객 응답 필드에는 추가하지 않으며, 중복만으로 거부 건수나 PARTIAL 상태를 늘리지 않는다.
 - 검색 전체 deadline에서 취소된 진행 호출은 CANCELLED로 기록한다. 시작되지 않은 배치는 호출 시도가 아니므로 `supplier.calls`에 넣지 않는다. 최종 Supplier 결과와 `supplier.search.failures`에는 TIMEOUT이 남는다.
 - 카탈로그 HTTP 성공만으로 마지막 동기화 성공 시각을 갱신하지 않는다. snapshot 저장이 실패하면 이전 성공 시각을 유지하고 실패 횟수를 올린다. 이 지표는 메모리에 있으며 재시작하면 초기화된다.
+- `supplier.catalog.last.success=0`은 이 프로세스에서 최초 저장 성공이 아직 없다는 뜻이다. 신선도 알림에서 0을 epoch 시각으로 빼면 기동 직후부터 오래된 데이터로 오인하고, 0을 무조건 제외하면 최초 동기화가 계속 실패하는 상태를 놓친다. 프로세스 기동 후 초기 동기화·제한 retry를 수행할 유예 시간을 두고, 유예 이후에도 최초 성공이 없는 상태와 성공 이후 허용 갱신 간격을 초과한 상태를 각각 감시한다. 연속 실패 횟수를 함께 보고 재시작으로 이 값들이 초기화된다는 점도 고려한다. 현재 프로젝트에는 이 알림 규칙을 구현한 외부 모니터링 설정이 없다.
 - 사용자 입력·숙소 코드·객실 ID·예외 메시지는 업무 지표 태그로 쓰지 않는다. 풀 지표의 주소는 설정된 Supplier 주소다.
 
 ### 17.4 검증과 남은 경계
