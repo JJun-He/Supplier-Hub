@@ -14,6 +14,7 @@ import org.springframework.web.reactive.function.client.WebClient;
 import org.springframework.web.reactive.function.client.WebClientRequestException;
 import org.springframework.web.reactive.function.client.WebClientResponseException;
 
+import com.supplierhub.shared.InvalidValueException;
 import com.supplierhub.catalog.domain.CatalogSnapshot;
 import com.supplierhub.catalog.domain.CatalogSnapshot.CatalogProperty;
 import com.supplierhub.catalog.domain.CatalogSnapshot.CatalogRoomType;
@@ -77,7 +78,7 @@ public class SupplierBCatalogClient implements SupplierCatalogClient {
 				)
 			)
 			.onErrorMap(
-				IllegalArgumentException.class,
+				InvalidValueException.class,
 				cause -> new SupplierIntegrationException(
 					supplier(),
 					SupplierFailureType.INVALID_RESPONSE,

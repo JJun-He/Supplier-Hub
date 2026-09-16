@@ -5,6 +5,8 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 
+import com.supplierhub.shared.InvalidValueException;
+
 final class StayDateCoverage {
 
 	private StayDateCoverage() {
@@ -16,7 +18,7 @@ final class StayDateCoverage {
 		String valueName
 	) {
 		if (dates.size() != criteria.nightCount()) {
-			throw new IllegalArgumentException(
+			throw new InvalidValueException(
 				valueName + " dates must cover the entire stay"
 			);
 		}
@@ -24,12 +26,12 @@ final class StayDateCoverage {
 		Set<LocalDate> uniqueDates = new HashSet<>();
 		for (LocalDate date : dates) {
 			if (!criteria.containsStayDate(date)) {
-				throw new IllegalArgumentException(
+				throw new InvalidValueException(
 					valueName + " date is outside the stay"
 				);
 			}
 			if (!uniqueDates.add(date)) {
-				throw new IllegalArgumentException(
+				throw new InvalidValueException(
 					valueName + " dates must not contain duplicates"
 				);
 			}

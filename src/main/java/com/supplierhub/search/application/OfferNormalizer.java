@@ -13,6 +13,7 @@ import java.util.function.Function;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import com.supplierhub.shared.InvalidValueException;
 import com.supplierhub.catalog.domain.Supplier;
 import com.supplierhub.search.domain.Offer;
 import com.supplierhub.search.domain.OfferCandidate;
@@ -82,7 +83,7 @@ public final class OfferNormalizer {
 			}
 			try {
 				if (candidate.supplier() != sourceSupplier) {
-					throw new IllegalArgumentException(
+					throw new InvalidValueException(
 						"candidate supplier must match the source supplier"
 					);
 				}
@@ -92,9 +93,7 @@ public final class OfferNormalizer {
 				} else {
 					unavailableOfferCount++;
 				}
-			} catch (
-				IllegalArgumentException | ArithmeticException exception
-			) {
+			} catch (InvalidValueException exception) {
 				rejectedOfferCount++;
 				logRejection(index, sourceSupplier, candidate, exception);
 			}

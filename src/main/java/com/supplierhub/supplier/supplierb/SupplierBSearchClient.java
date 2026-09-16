@@ -18,6 +18,7 @@ import org.springframework.web.reactive.function.client.WebClient;
 import org.springframework.web.reactive.function.client.WebClientRequestException;
 import org.springframework.web.reactive.function.client.WebClientResponseException;
 
+import com.supplierhub.shared.InvalidValueException;
 import com.supplierhub.catalog.domain.Supplier;
 import com.supplierhub.search.application.OfferMappingException;
 import com.supplierhub.search.application.OfferNormalizationResult;
@@ -128,7 +129,7 @@ public class SupplierBSearchClient implements SupplierSearchClient {
 				throw SupplierBFailureMapper.bodyFailure(code, "search");
 			}
 			items = SupplierJson.array(SupplierJson.field(response, "data"), "items");
-		} catch (IllegalArgumentException exception) {
+		} catch (InvalidValueException exception) {
 			throw new SupplierIntegrationException(
 				supplier(), SupplierFailureType.INVALID_RESPONSE, false,
 				"Supplier search envelope was invalid", exception
@@ -154,10 +155,10 @@ public class SupplierBSearchClient implements SupplierSearchClient {
 				SupplierJson.text(item, "propertyId"), SupplierJson.text(item, "roomId")
 			));
 			if (mapping == null) {
-				throw new IllegalArgumentException("search item must have an active internal mapping");
+				throw new InvalidValueException("search item must have an active internal mapping");
 			}
 			if (!SupplierJson.bool(item, "taxIncluded")) {
-				throw new IllegalArgumentException("totalPrice must include tax");
+				throw new InvalidValueException("totalPrice must include tax");
 			}
 			List<DailyInventory> inventory = SupplierJson.array(item, "inventory").stream()
 				.map(day -> new DailyInventory(
@@ -169,7 +170,7 @@ public class SupplierBSearchClient implements SupplierSearchClient {
 				Price.totalOnly(Money.of(SupplierJson.text(item, "currency"), SupplierJson.longInteger(item, "totalPrice"))),
 				inventory
 			);
-		} catch (IllegalArgumentException | ArithmeticException exception) {
+		} catch (InvalidValueException exception) {
 			throw new OfferMappingException(exception);
 		}
 	}

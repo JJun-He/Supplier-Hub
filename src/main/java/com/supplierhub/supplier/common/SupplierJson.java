@@ -7,6 +7,8 @@ import java.util.stream.IntStream;
 
 import tools.jackson.databind.JsonNode;
 
+import com.supplierhub.shared.InvalidValueException;
+
 /** Reads external values without scalar coercion. Supplier field names stay in adapters. */
 public final class SupplierJson {
 
@@ -15,11 +17,11 @@ public final class SupplierJson {
 
 	public static JsonNode field(JsonNode object, String name) {
 		if (object == null || !object.isObject()) {
-			throw new IllegalArgumentException("Supplier item must be an object");
+			throw new InvalidValueException("Supplier item must be an object");
 		}
 		JsonNode value = object.get(name);
 		if (value == null || value.isNull()) {
-			throw new IllegalArgumentException(name + " must not be null");
+			throw new InvalidValueException(name + " must not be null");
 		}
 		return value;
 	}
@@ -27,7 +29,7 @@ public final class SupplierJson {
 	public static String text(JsonNode object, String name) {
 		JsonNode value = field(object, name);
 		if (!value.isString() || value.asString().isBlank()) {
-			throw new IllegalArgumentException(name + " must be a non-blank string");
+			throw new InvalidValueException(name + " must be a non-blank string");
 		}
 		return value.asString();
 	}
@@ -35,7 +37,7 @@ public final class SupplierJson {
 	public static int integer(JsonNode object, String name) {
 		JsonNode value = field(object, name);
 		if (!value.isIntegralNumber() || !value.canConvertToInt()) {
-			throw new IllegalArgumentException(name + " must be a 32-bit JSON integer");
+			throw new InvalidValueException(name + " must be a 32-bit JSON integer");
 		}
 		return value.intValue();
 	}
@@ -43,7 +45,7 @@ public final class SupplierJson {
 	public static long longInteger(JsonNode object, String name) {
 		JsonNode value = field(object, name);
 		if (!value.isIntegralNumber() || !value.canConvertToLong()) {
-			throw new IllegalArgumentException(name + " must be a 64-bit JSON integer");
+			throw new InvalidValueException(name + " must be a 64-bit JSON integer");
 		}
 		return value.longValue();
 	}
@@ -51,7 +53,7 @@ public final class SupplierJson {
 	public static boolean bool(JsonNode object, String name) {
 		JsonNode value = field(object, name);
 		if (!value.isBoolean()) {
-			throw new IllegalArgumentException(name + " must be a JSON boolean");
+			throw new InvalidValueException(name + " must be a JSON boolean");
 		}
 		return value.booleanValue();
 	}
@@ -60,14 +62,14 @@ public final class SupplierJson {
 		try {
 			return LocalDate.parse(text(object, name));
 		} catch (DateTimeParseException exception) {
-			throw new IllegalArgumentException(name + " must be an ISO local date", exception);
+			throw new InvalidValueException(name + " must be an ISO local date", exception);
 		}
 	}
 
 	public static List<JsonNode> array(JsonNode object, String name) {
 		JsonNode value = field(object, name);
 		if (!value.isArray()) {
-			throw new IllegalArgumentException(name + " must be an array");
+			throw new InvalidValueException(name + " must be an array");
 		}
 		return IntStream.range(0, value.size()).mapToObj(value::get).toList();
 	}

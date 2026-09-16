@@ -105,7 +105,7 @@ curl -X POST 'http://localhost:18080/control/b/mode?value=normal'
 ./gradlew test
 ```
 
-2026-09-16의 8-A 검증 결과는 메인 212개·Mock 6개 통과이며 실패·오류·건너뜀은 없습니다. parameterized test의 각 입력 사례를 포함한 실행 건수입니다. 변경과 검증 기록은 [JOURNAL](JOURNAL.md), 감사 당시 검증과 한계는 [구조 감사](docs/structure-audit.md)에 있습니다.
+2026-09-16의 8-A 검증 결과는 메인 214개·Mock 6개 통과이며 실패·오류·건너뜀은 없습니다. parameterized test의 각 입력 사례를 포함한 실행 건수입니다. 변경과 검증 기록은 [JOURNAL](JOURNAL.md), 감사 당시 검증과 한계는 [구조 감사](docs/structure-audit.md)에 있습니다.
 
 실행 중인 두 `bootRun`은 각각 Ctrl+C로 종료합니다. DB 종료 명령은 다음과 같으며 데이터 볼륨은 유지됩니다.
 

@@ -3,6 +3,8 @@ package com.supplierhub.search.domain;
 import java.time.LocalDate;
 import java.util.Objects;
 
+import com.supplierhub.shared.InvalidValueException;
+
 public record NightlyPrice(
 	LocalDate date,
 	Money baseAmount,
@@ -14,7 +16,7 @@ public record NightlyPrice(
 		Objects.requireNonNull(baseAmount, "baseAmount must not be null");
 		Objects.requireNonNull(taxAmount, "taxAmount must not be null");
 		if (!baseAmount.currency().equals(taxAmount.currency())) {
-			throw new IllegalArgumentException(
+			throw new InvalidValueException(
 				"base and tax currencies must match"
 			);
 		}

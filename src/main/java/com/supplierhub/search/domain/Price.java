@@ -6,6 +6,8 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Set;
 
+import com.supplierhub.shared.InvalidValueException;
+
 public record Price(
 	Money totalAmount,
 	List<NightlyPrice> nightlyBreakdown
@@ -37,7 +39,7 @@ public record Price(
 			"nightlyPrices must not be null"
 		));
 		if (copiedPrices.isEmpty()) {
-			throw new IllegalArgumentException("nightlyPrices must not be empty");
+			throw new InvalidValueException("nightlyPrices must not be empty");
 		}
 		return new Price(calculateTotal(copiedPrices), copiedPrices);
 	}
@@ -63,7 +65,7 @@ public record Price(
 		Money total = null;
 		for (NightlyPrice nightlyPrice : nightlyPrices) {
 			if (!dates.add(nightlyPrice.date())) {
-				throw new IllegalArgumentException("nightly price dates must be unique");
+				throw new InvalidValueException("nightly price dates must be unique");
 			}
 			total = total == null
 				? nightlyPrice.totalAmount()

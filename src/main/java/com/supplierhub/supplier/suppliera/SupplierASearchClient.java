@@ -19,6 +19,7 @@ import org.springframework.web.reactive.function.client.WebClient;
 import org.springframework.web.reactive.function.client.WebClientRequestException;
 import org.springframework.web.reactive.function.client.WebClientResponseException;
 
+import com.supplierhub.shared.InvalidValueException;
 import com.supplierhub.catalog.domain.Supplier;
 import com.supplierhub.search.application.OfferMappingException;
 import com.supplierhub.search.application.OfferNormalizationResult;
@@ -124,7 +125,7 @@ public class SupplierASearchClient implements SupplierSearchClient {
 		List<JsonNode> items;
 		try {
 			items = SupplierJson.array(response, "items");
-		} catch (IllegalArgumentException exception) {
+		} catch (InvalidValueException exception) {
 			throw new SupplierIntegrationException(
 				supplier(), SupplierFailureType.INVALID_RESPONSE, false,
 				"Supplier search envelope was invalid", exception
@@ -150,7 +151,7 @@ public class SupplierASearchClient implements SupplierSearchClient {
 				SupplierJson.text(item, "hotelCode"), SupplierJson.text(item, "roomTypeCode")
 			));
 			if (mapping == null) {
-				throw new IllegalArgumentException("availability item must have an active internal mapping");
+				throw new InvalidValueException("availability item must have an active internal mapping");
 			}
 			String currency = SupplierJson.text(item, "currency");
 			List<JsonNode> rates = SupplierJson.array(item, "dailyRates");
@@ -167,7 +168,7 @@ public class SupplierASearchClient implements SupplierSearchClient {
 				SupplierJson.integer(item, "maxOccupancy"), SupplierJson.bool(item, "breakfastIncluded"),
 				Price.fromNightlyPrices(prices), inventory
 			);
-		} catch (IllegalArgumentException | ArithmeticException exception) {
+		} catch (InvalidValueException exception) {
 			throw new OfferMappingException(exception);
 		}
 	}

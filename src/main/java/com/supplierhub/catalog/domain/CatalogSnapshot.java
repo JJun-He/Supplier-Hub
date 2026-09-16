@@ -5,6 +5,8 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Set;
 
+import com.supplierhub.shared.InvalidValueException;
+
 public record CatalogSnapshot(
 	Supplier supplier,
 	List<CatalogProperty> properties
@@ -25,7 +27,7 @@ public record CatalogSnapshot(
 		Set<String> propertyCodes = new HashSet<>();
 		for (CatalogProperty property : properties) {
 			if (!propertyCodes.add(property.supplierPropertyCode())) {
-				throw new IllegalArgumentException(
+				throw new InvalidValueException(
 					"duplicate supplier property code"
 				);
 			}
@@ -44,7 +46,7 @@ public record CatalogSnapshot(
 				"supplierPropertyCode"
 			);
 			if (supplierPropertyCode.contains(",")) {
-				throw new IllegalArgumentException(
+				throw new InvalidValueException(
 					"supplierPropertyCode must not contain a comma"
 				);
 			}
@@ -62,7 +64,7 @@ public record CatalogSnapshot(
 			Set<String> roomTypeCodes = new HashSet<>();
 			for (CatalogRoomType roomType : roomTypes) {
 				if (!roomTypeCodes.add(roomType.supplierRoomTypeCode())) {
-					throw new IllegalArgumentException(
+					throw new InvalidValueException(
 						"duplicate supplier room type code"
 					);
 				}
@@ -84,7 +86,7 @@ public record CatalogSnapshot(
 			);
 			name = requireText(name, "name");
 			if (maxOccupancy <= 0) {
-				throw new IllegalArgumentException(
+				throw new InvalidValueException(
 					"maxOccupancy must be positive"
 				);
 			}
@@ -94,7 +96,7 @@ public record CatalogSnapshot(
 
 	private static String requireText(String value, String fieldName) {
 		if (value == null || value.isBlank()) {
-			throw new IllegalArgumentException(fieldName + " must not be blank");
+			throw new InvalidValueException(fieldName + " must not be blank");
 		}
 		return value;
 	}

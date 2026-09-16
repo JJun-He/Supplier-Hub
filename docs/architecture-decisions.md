@@ -568,6 +568,8 @@ Supplier 응답은 어댑터 안에서 Jackson 3 `JsonNode`로 읽는다. 공통
 - 검색에서 JSON 문법이나 최상위 응답 구조가 잘못되면 배치가 `INVALID_RESPONSE`로 실패한다. 분리 가능한 항목의 타입·날짜·값 오류는 `OfferMappingException`으로 표시하여 그 항목만 거부한다.
 - 카탈로그는 누락 판정에 쓰는 전체 snapshot이다. 잘못된 항목을 조용히 빼면 기존 매핑을 비활성화할 수 있으므로 하나라도 잘못되면 snapshot 전체를 거부한다.
 
+잘못된 항목이 계속 반환되면 주기적 동기화 시도는 계속되지만 성공한 snapshot의 갱신은 멈춘다. 기존 매핑으로 검색을 제공하는 대신 데이터가 오래될 수 있다. 마지막 동기화 성공 시각과 연속 실패 신호는 8-B에서 추가한다.
+
 응답을 메모리에 모으는 방식은 유지한다. 응답 크기 한도·전역 동시성·메모리 비용은 8-B에서 별도로 검증한다. Jackson 2가 간접 의존성에 있어도 실제 Boot WebClient는 Jackson 3을 사용하므로, 회귀 테스트는 애플리케이션에 주입되는 실제 client를 사용한다.
 
 ### 16.2 중복과 객실 속성 충돌
@@ -577,6 +579,8 @@ Supplier 응답은 어댑터 안에서 Jackson 3 `JsonNode`로 읽는다. 공통
 금액·재고·조식·통화·일별 가격 구성이 다르면 각각 보존한다. 현재 응답에는 요금제 식별자가 없으므로 같은 객실이라는 이유만으로 같은 상품의 충돌이라고 확정하거나 최저가 하나를 고르지 않는다. 요금제 계약이 생기면 동일 요금제의 충돌 규칙을 추가한다.
 
 최대 수용 인원은 고객 응답에서 객실 타입 단위 속성이다. 반환 가능한 Offer 사이에서 같은 내부 객실 ID의 수용 인원이 다르면 그 객실의 Offer를 모두 거부하고 다른 객실은 유지한다. 이때 중복 제거 후 제외한 Offer 수를 `rejectedOfferCount`에 더한다. 입력 순서에 따라 임의의 수용 인원을 선택하지 않는다. 서로 다른 숙소의 같은 원본 객실 코드는 별도 내부 ID이므로 영향을 주지 않는다.
+
+현재 검색은 한 숙소의 모든 객실을 하나의 배치에 포함한다. 따라서 동일 내부 객실의 Offer는 하나의 배치에서 충돌 검사된다. 같은 숙소를 여러 배치로 나누거나 중첩된 재시도 결과를 합치는 경우에는 최종 집계 경계의 충돌 검사를 다시 설계해야 한다.
 
 ### 16.3 요청과 어댑터 계약
 
@@ -588,7 +592,7 @@ Supplier 응답은 어댑터 안에서 Jackson 3 `JsonNode`로 읽는다. 공통
 
 B의 HTTP 200 본문 실패 코드 매핑은 B 전용 매퍼 하나로 합쳤다. HTTP 상태, B 본문 코드, transport timeout은 각각의 계약 경계에서 변환한다.
 
-예상 밖 mapper의 NPE·상태 오류를 잘못된 외부 항목으로 숨기지 않는다. 검색 배치나 카탈로그 처리에서 분류되지 않은 내부 예외는 `INTERNAL_ERROR`와 ERROR 로그로 기록하고 원인 stack trace를 보존한다. 정상 Supplier 결과는 유지한다. 알려지지 않은 HTTP 상태와 별도 분류되지 않은 WebClient 응답 읽기 실패는 `UNKNOWN`으로 구분한다. 버퍼 초과의 전용 분류는 8-B에서 보완한다.
+JSON 타입 검사와 외부 값의 도메인 검증은 `InvalidValueException`으로 명시한다. 금액 overflow는 정확한 덧셈 지점에서 이 예외로 변환한다. 검색은 이 예외만 항목 거부로, 카탈로그는 snapshot 거부로 변환한다. 내부 식별자·계산 결과 불변식 검증은 일반 예외로 남긴다. 예상 밖 mapper의 NPE·상태 오류·일반 IllegalArgumentException을 잘못된 외부 항목으로 숨기지 않는다. 검색 배치나 카탈로그 처리에서 분류되지 않은 내부 예외는 `INTERNAL_ERROR`와 ERROR 로그로 기록하고 원인 stack trace를 보존한다. 정상 Supplier 결과는 유지한다. 알려지지 않은 HTTP 상태와 별도 분류되지 않은 WebClient 응답 읽기 실패는 `UNKNOWN`으로 구분한다. 버퍼 초과의 전용 분류는 8-B에서 보완한다.
 
 `INTERNAL_ERROR`는 고객 응답의 `supplierResults[].failureTypes[]`에 추가된 enum이다. 부분 실패는 HTTP 200/`PARTIAL`, 모든 조회 실패는 HTTP 503/`FAILED`를 유지한다. 내부 예외 메시지·stack trace는 고객 응답에 넣지 않는다. Supplier 실패 지표는 아직 8-B 작업이다.
 
@@ -596,10 +600,10 @@ B의 HTTP 200 본문 실패 코드 매핑은 B 전용 매퍼 하나로 합쳤다
 
 | 계약 | 정식 테스트 |
 | --- | --- |
-| 실제 Boot codec, 타입·범위·날짜, 형제 항목 보존, 카탈로그 원자적 거부 | `SupplierInputBoundaryTests` |
-| 완전 중복·날짜 배열 순서·다른 판매 조건·수용 인원 충돌·특수 코드 | `SupplierInputBoundaryTests` |
+| 실제 Boot codec, 타입·범위·날짜, 형제 항목 보존, 카탈로그 원자적 거부 | `SupplierAdapterContractTests` |
+| 완전 중복·날짜 배열 순서·다른 판매 조건·수용 인원 충돌·특수 코드 | `SupplierAdapterContractTests` |
 | HTTP 상태·재시도 가능 여부·중첩 timeout | `SupplierFailureMapperTests` |
-| B 본문 코드의 검색·카탈로그 적용 | `SupplierInputBoundaryTests` |
+| B 본문 코드의 검색·카탈로그 적용 | `SupplierAdapterContractTests` |
 | mapper 내부 오류 전파, 정상 Supplier 유지 | `OfferNormalizerTests`, `IntegratedSearchServiceTests` |
 | client 누락·중복, 잘못된 snapshot, 빈 Publisher, 동기 실패 retry | `CatalogSynchronizationServiceTests` |
 | `INTERNAL_ERROR`의 부분·전체 실패 JSON 및 HTTP 계약 | `StaySearchControllerTests` |

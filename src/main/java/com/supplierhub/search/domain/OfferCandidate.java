@@ -3,6 +3,7 @@ package com.supplierhub.search.domain;
 import java.util.List;
 import java.util.Objects;
 
+import com.supplierhub.shared.InvalidValueException;
 import com.supplierhub.catalog.domain.Supplier;
 
 public record OfferCandidate(
@@ -24,7 +25,7 @@ public record OfferCandidate(
 		}
 		Objects.requireNonNull(supplier, "supplier must not be null");
 		if (maxOccupancy <= 0) {
-			throw new IllegalArgumentException("maxOccupancy must be positive");
+			throw new InvalidValueException("maxOccupancy must be positive");
 		}
 		Objects.requireNonNull(price, "price must not be null");
 		dailyInventory = List.copyOf(Objects.requireNonNull(
