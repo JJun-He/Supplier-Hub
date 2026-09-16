@@ -117,7 +117,7 @@ class SupplierResourceIntegrationTests {
 			await().atMost(WAIT)
 					.untilAsserted(() -> assertThat(count("/a/v1/availability")).isEqualTo(2));
 			assertThat(active(Supplier.SUPPLIER_A)).isEqualTo(2);
-			// Two customers retain A's entire capacity while six more customers search.
+			// 고객 2명이 A의 허용량을 모두 점유한 동안 6명이 추가 검색한다.
 			for (int i = 0; i < 6; i++) {
 				var result = service.search(CRITERIA);
 				assertThat(result.status()).isEqualTo(SearchStatus.PARTIAL);
@@ -126,7 +126,7 @@ class SupplierResourceIntegrationTests {
 				assertThat(result.supplierResults().getLast().failureTypes()).isEmpty();
 			}
 			assertThat(count("/a/v1/availability")).isEqualTo(2);
-			// The catalog pool and allowance are independent even for the same Supplier.
+			// 같은 Supplier라도 카탈로그 연결 풀과 허용량은 독립적이다.
 			assertThat(
 							fixture.resources
 									.execute(
@@ -335,7 +335,7 @@ class SupplierResourceIntegrationTests {
 
 	@Test
 	void poolPendingOverflowAndTimeoutAreCapacityFailuresAndCancellationRecovers() {
-		// Bypass admission deliberately to exercise the actual underlying pool boundary.
+		// 호출 수 제한을 우회해 실제 연결 풀의 한도를 검증한다.
 		gate = Sinks.one();
 		Disposable first = a.search(request(1, 1, 1)).subscribe();
 		Disposable second = a.search(request(1, 1, 1)).subscribe();

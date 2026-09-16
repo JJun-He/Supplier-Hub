@@ -43,7 +43,7 @@ import com.supplierhub.supplier.suppliera.SupplierACatalogClient;
 import com.supplierhub.supplier.supplierb.SupplierBCatalogClient;
 import com.zaxxer.hikari.HikariDataSource;
 
-/** Verifies committed database state without a surrounding test transaction. */
+/** 테스트 트랜잭션 없이 실제 commit된 DB 상태를 검증한다. */
 @SpringBootTest(properties = {
 	"supplier.catalog.enabled=false",
 	"spring.jpa.properties.hibernate.generate_statistics=true",

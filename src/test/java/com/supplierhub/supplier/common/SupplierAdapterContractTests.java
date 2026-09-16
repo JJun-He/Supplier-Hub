@@ -38,7 +38,7 @@ import java.util.Map;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
-/** Exercises the actual Boot WebClient codecs, not a test-specific ObjectMapper. */
+/** 실제 Boot WebClient에 주입된 codec을 검증한다. */
 @SpringBootTest(properties = "supplier.catalog.enabled=false")
 class SupplierAdapterContractTests {
 

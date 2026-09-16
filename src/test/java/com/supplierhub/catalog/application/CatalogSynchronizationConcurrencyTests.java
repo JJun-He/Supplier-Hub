@@ -207,8 +207,7 @@ class CatalogSynchronizationConcurrencyTests {
 			}, Duration.ofHours(1));
 			var running = executor.submit(service::synchronizeAll);
 			try {
-				// The first timeout task and retry delay have both been scheduled.
-				// Virtual time stays still, so the retry cannot race this assertion.
+				// 첫 호출의 시간 제한과 재시도 대기를 예약한 뒤, 가상 시간을 멈춰 경합을 막는다.
 				await().atMost(Duration.ofSeconds(5)).untilAsserted(() -> {
 					assertThat(scheduler.getScheduledTaskCount()).isGreaterThanOrEqualTo(2);
 					assertThat(fetches).hasValue(1);
@@ -226,7 +225,7 @@ class CatalogSynchronizationConcurrencyTests {
 				assertThat(lastSuccess(Supplier.SUPPLIER_A)).isZero();
 				assertThat(failures(Supplier.SUPPLIER_A)).isZero();
 
-				// Covers the default retry jitter without any wall-clock delay.
+				// 재시도 지연의 무작위 변동까지 실제 대기 없이 넘긴다.
 				scheduler.advanceTimeBy(Duration.ofHours(2));
 				running.get(5, TimeUnit.SECONDS);
 				assertThat(fetches).hasValue(2);

@@ -36,11 +36,11 @@ out/
 ### VS Code ###
 .vscode/
 
-### Local environment ###
+### 로컬 환경 ###
 .env
 .env.*
 !.env.example
 
-### Local Spring configuration ###
+### 로컬 Spring 설정 ###
 application-local.yaml
 application-local.yml

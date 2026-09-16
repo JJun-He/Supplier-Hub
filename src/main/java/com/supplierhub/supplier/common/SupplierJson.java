@@ -9,7 +9,7 @@ import tools.jackson.databind.JsonNode;
 
 import com.supplierhub.shared.InvalidValueException;
 
-/** Reads external values without scalar coercion. Supplier field names stay in adapters. */
+/** 외부 값을 묵시적 타입 변환 없이 읽는다. Supplier 필드명은 어댑터에서 해석한다. */
 public final class SupplierJson {
 
 	private SupplierJson() {

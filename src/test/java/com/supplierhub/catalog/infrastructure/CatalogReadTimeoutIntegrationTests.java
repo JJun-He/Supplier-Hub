@@ -43,7 +43,7 @@ import com.supplierhub.supplier.common.SupplierIntegrationProperties;
 import com.supplierhub.supplier.common.SupplierResourceFixture;
 import com.supplierhub.supplier.common.SupplierSearchClient;
 
-/** Exercises real PostgreSQL cancellation and a single reusable pool connection. */
+/** 실제 PostgreSQL 쿼리 취소와 풀 연결 하나의 재사용을 검증한다. */
 @SpringBootTest(properties = {
 	"supplier.catalog.enabled=false",
 	"spring.datasource.hikari.maximum-pool-size=1",
@@ -217,7 +217,7 @@ class CatalogReadTimeoutIntegrationTests {
 		RoomTypeRepository slowMaterialization = mock(RoomTypeRepository.class);
 		when(slowMaterialization.findAllActiveMappingsForSearch()).thenAnswer(invocation -> {
 			var rows = roomTypeRepository.findAllActiveMappingsForSearch();
-			// A completed SQL statement cannot interrupt subsequent Java materialization.
+			// SQL이 끝나면 이후 Java 객체 변환을 SQL 시간 제한으로 중단할 수 없다.
 			Thread.sleep(150);
 			return rows;
 		});

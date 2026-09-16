@@ -43,8 +43,7 @@ public class JpaActiveCatalogMappingReader implements ActiveCatalogMappingReader
 		this.jdbcTemplate = jdbcTemplate;
 		this.transaction = new TransactionTemplate(transactionManager);
 		this.transaction.setReadOnly(true);
-		// The read must release its connection and local settings before returning,
-		// including when a caller already has an open transaction.
+		// 외부 트랜잭션이 있어도 반환 전에 조회 연결과 임시 설정을 정리한다.
 		this.transaction.setPropagationBehavior(
 			TransactionDefinition.PROPAGATION_REQUIRES_NEW
 		);
@@ -80,7 +79,7 @@ public class JpaActiveCatalogMappingReader implements ActiveCatalogMappingReader
 
 	private void configureTimeouts(long deadlineNanos) {
 		jdbcTemplate.execute((ConnectionCallback<Void>) connection -> {
-			// Connection acquisition may already have spent most of the budget.
+			// 연결 획득에 쓴 시간을 예산에서 뺀다.
 			long remaining = remainingNanos(deadlineNanos);
 			long statementMillis = ceilMillis(Math.min(statementTimeoutNanos, remaining));
 			long lockMillis = ceilMillis(Math.min(lockTimeoutNanos, remaining));
@@ -105,7 +104,7 @@ public class JpaActiveCatalogMappingReader implements ActiveCatalogMappingReader
 	}
 
 	private static long ceilMillis(long positiveNanos) {
-		// Zero disables PostgreSQL timeouts, so round a positive remainder up.
+		// PostgreSQL은 0을 무제한으로 해석하므로 양수 잔여 시간을 올림한다.
 		return 1 + (positiveNanos - 1) / 1_000_000;
 	}
 
