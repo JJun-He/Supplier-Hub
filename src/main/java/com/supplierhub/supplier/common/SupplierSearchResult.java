@@ -10,7 +10,8 @@ public record SupplierSearchResult(
 	Supplier supplier,
 	List<Offer> offers,
 	int rejectedOfferCount,
-	int unavailableOfferCount
+	int unavailableOfferCount,
+	int duplicateOfferCount
 ) {
 
 	public SupplierSearchResult {
@@ -19,7 +20,7 @@ public record SupplierSearchResult(
 			offers,
 			"offers must not be null"
 		));
-		if (rejectedOfferCount < 0 || unavailableOfferCount < 0) {
+		if (rejectedOfferCount < 0 || unavailableOfferCount < 0 || duplicateOfferCount < 0) {
 			throw new IllegalArgumentException("offer counts must not be negative");
 		}
 	}

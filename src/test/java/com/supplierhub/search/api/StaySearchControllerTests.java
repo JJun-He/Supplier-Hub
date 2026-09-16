@@ -126,7 +126,7 @@ class StaySearchControllerTests {
 	}
 
 	@ParameterizedTest
-	@EnumSource(value = SupplierFailureType.class, names = {"TIMEOUT", "INTERNAL_ERROR"})
+	@EnumSource(value = SupplierFailureType.class, names = {"TIMEOUT", "INTERNAL_ERROR", "CAPACITY_EXCEEDED", "RESPONSE_TOO_LARGE"})
 	void returnsHttpOkAndFailureDetailsForPartialSearch(SupplierFailureType failureType) throws Exception {
 		Offer offer = offer(
 			1,
@@ -178,7 +178,7 @@ class StaySearchControllerTests {
 	}
 
 	@ParameterizedTest
-	@EnumSource(value = SupplierFailureType.class, names = {"CATALOG_UNAVAILABLE", "INTERNAL_ERROR"})
+	@EnumSource(value = SupplierFailureType.class, names = {"CATALOG_UNAVAILABLE", "INTERNAL_ERROR", "CAPACITY_EXCEEDED", "RESPONSE_TOO_LARGE"})
 	void returnsHttpServiceUnavailableWhileKeepingFailureBody(SupplierFailureType failureType) throws Exception {
 		when(searchService.search(any(SearchCriteria.class))).thenReturn(
 			new IntegratedSearchResult(

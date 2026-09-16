@@ -84,6 +84,13 @@ public class SupplierASearchClient implements SupplierSearchClient {
 			.timeout(properties.search().callTimeout())
 			.onErrorMap(
 				cause -> !(cause instanceof SupplierIntegrationException)
+					&& SupplierTransportFailureMapper.isResourceFailure(cause),
+				cause -> SupplierTransportFailureMapper.resourceFailure(
+					supplier(), "Supplier request", cause
+				)
+			)
+			.onErrorMap(
+				cause -> !(cause instanceof SupplierIntegrationException)
 					&& SupplierTransportFailureMapper.isTimeout(cause),
 				cause -> SupplierTransportFailureMapper.timeoutFailure(
 					supplier(),
@@ -141,7 +148,8 @@ public class SupplierASearchClient implements SupplierSearchClient {
 			supplier(),
 			normalized.offers(),
 			normalized.rejectedOfferCount(),
-			normalized.unavailableOfferCount()
+			normalized.unavailableOfferCount(),
+			normalized.duplicateOfferCount()
 		);
 	}
 

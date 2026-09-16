@@ -17,6 +17,9 @@ import reactor.util.retry.Retry;
 
 import com.supplierhub.catalog.domain.CatalogSnapshot;
 import com.supplierhub.catalog.domain.Supplier;
+import com.supplierhub.supplier.common.SupplierCallResources;
+import com.supplierhub.supplier.common.SupplierMetrics;
+import com.supplierhub.supplier.common.SupplierOperation;
 import com.supplierhub.supplier.common.SupplierCatalogClient;
 import com.supplierhub.supplier.common.SupplierFailureType;
 import com.supplierhub.supplier.common.SupplierIntegrationException;
@@ -35,11 +38,15 @@ public class CatalogSynchronizationService {
 	private final Duration callTimeout;
 	private final int maxRetries;
 	private final Duration retryBackoff;
+	private final SupplierCallResources resources;
+	private final SupplierMetrics metrics;
 
 	public CatalogSynchronizationService(
 		List<SupplierCatalogClient> clients,
 		CatalogSnapshotStore snapshotStore,
-		SupplierIntegrationProperties properties
+		SupplierIntegrationProperties properties,
+		SupplierCallResources resources,
+		SupplierMetrics metrics
 	) {
 		requireClientContracts(clients, properties);
 		this.clients = clients.stream()
@@ -50,6 +57,8 @@ public class CatalogSynchronizationService {
 		this.callTimeout = properties.catalog().callTimeout();
 		this.maxRetries = properties.catalog().maxRetries();
 		this.retryBackoff = properties.catalog().retryBackoff();
+		this.resources = resources;
+		this.metrics = metrics;
 	}
 
 	public void synchronizeAll() {
@@ -59,8 +68,20 @@ public class CatalogSynchronizationService {
 	}
 
 	private void synchronize(SupplierCatalogClient client) {
+		long started = System.nanoTime();
+		SupplierFailureType failure = SupplierFailureType.INTERNAL_ERROR;
 		try {
-			CatalogSnapshot snapshot = Mono.defer(client::fetchCatalog)
+			CatalogSnapshot snapshot = resources.execute(
+				client.supplier(), SupplierOperation.CATALOG, () -> Mono.defer(client::fetchCatalog)
+				.switchIfEmpty(Mono.error(new SupplierIntegrationException(
+					client.supplier(), SupplierFailureType.INVALID_RESPONSE, false,
+					"Supplier catalog completed without a snapshot"
+				)))
+				.doOnNext(value -> {
+					if (value.supplier() != client.supplier()) {
+						throw new IllegalStateException("Catalog snapshot supplier must match the client supplier");
+					}
+				})
 				.timeout(callTimeout)
 				.onErrorMap(
 					cause -> !(cause instanceof SupplierIntegrationException)
@@ -71,23 +92,14 @@ public class CatalogSynchronizationService {
 						cause
 					)
 				)
+				)
 				.retryWhen(Retry.backoff(maxRetries, retryBackoff)
 					.filter(this::isRetryable)
 					.onRetryExhaustedThrow((spec, signal) -> signal.failure()))
 				.block();
 
-			if (snapshot == null) {
-				throw new SupplierIntegrationException(
-					client.supplier(),
-					SupplierFailureType.INVALID_RESPONSE,
-					false,
-					"Supplier catalog completed without a snapshot"
-				);
-			}
-			if (snapshot.supplier() != client.supplier()) {
-				throw new IllegalStateException("Catalog snapshot supplier must match the client supplier");
-			}
 			CatalogSnapshotUpdate update = snapshotStore.replace(snapshot);
+			failure = null;
 			log.info(
 				"Supplier catalog synchronization succeeded: supplier={}, properties={}, roomTypes={}, createdProperties={}, createdRoomTypes={}, reactivatedProperties={}, reactivatedRoomTypes={}, suspectedMissingProperties={}, suspectedMissingRoomTypes={}, deactivatedProperties={}, deactivatedRoomTypes={}",
 				client.supplier(),
@@ -103,6 +115,7 @@ public class CatalogSynchronizationService {
 				update.deactivatedRoomTypes()
 			);
 		} catch (SupplierIntegrationException exception) {
+			failure = exception.getFailureType();
 			log.warn(
 				"Supplier catalog synchronization failed: supplier={}, failureType={}",
 				client.supplier(),
@@ -110,6 +123,7 @@ public class CatalogSynchronizationService {
 				exception
 			);
 		} catch (CatalogSnapshotRejectedException exception) {
+			failure = SupplierFailureType.INVALID_RESPONSE;
 			log.warn(
 				"Supplier catalog synchronization failed: supplier={}, failureType={}",
 				client.supplier(),
@@ -117,12 +131,15 @@ public class CatalogSynchronizationService {
 				exception
 			);
 		} catch (RuntimeException exception) {
+			failure = SupplierFailureType.INTERNAL_ERROR;
 			log.error(
 				"Supplier catalog synchronization failed: supplier={}, failureType={}",
 				client.supplier(),
 				SupplierFailureType.INTERNAL_ERROR,
 				exception
 			);
+		} finally {
+			metrics.catalogCompleted(client.supplier(), failure, started);
 		}
 	}
 

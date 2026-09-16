@@ -27,6 +27,9 @@ import com.supplierhub.catalog.application.ActiveCatalogMappingReader;
 import com.supplierhub.catalog.domain.Supplier;
 import com.supplierhub.search.domain.Offer;
 import com.supplierhub.search.domain.SearchCriteria;
+import com.supplierhub.supplier.common.SupplierCallResources;
+import com.supplierhub.supplier.common.SupplierMetrics;
+import com.supplierhub.supplier.common.SupplierOperation;
 import com.supplierhub.supplier.common.SupplierFailureType;
 import com.supplierhub.supplier.common.SupplierIntegrationException;
 import com.supplierhub.supplier.common.SupplierIntegrationProperties;
@@ -55,11 +58,15 @@ public class IntegratedSearchService {
 	private final List<SupplierSearchClient> clients;
 	private final Duration overallTimeout;
 	private final int maxConcurrency;
+	private final SupplierCallResources resources;
+	private final SupplierMetrics metrics;
 
 	public IntegratedSearchService(
 		ActiveCatalogMappingReader mappingReader,
 		List<SupplierSearchClient> clients,
-		SupplierIntegrationProperties properties
+		SupplierIntegrationProperties properties,
+		SupplierCallResources resources,
+		SupplierMetrics metrics
 	) {
 		this.mappingReader = Objects.requireNonNull(
 			mappingReader,
@@ -74,13 +81,29 @@ public class IntegratedSearchService {
 			.toList();
 		this.overallTimeout = properties.search().overallTimeout();
 		this.maxConcurrency = properties.search().maxConcurrency();
+		this.resources = resources;
+		this.metrics = metrics;
 	}
 
 	public IntegratedSearchResult search(SearchCriteria criteria) {
 		Objects.requireNonNull(criteria, "criteria must not be null");
 		long startedAt = System.nanoTime();
-		List<ActiveCatalogMapping> rows = mappingReader.findAllActive();
-		Map<Supplier, List<PropertyMapping>> mappings = groupMappings(rows);
+		try {
+			IntegratedSearchResult result = search(criteria, startedAt);
+			metrics.searchDuration(result.status().name(), startedAt);
+			result.supplierResults().forEach(outcome -> metrics.searchResult(
+				outcome.supplier(), outcome.status().name(), outcome.failureTypes()
+			));
+			return result;
+		} catch (RuntimeException exception) {
+			metrics.searchDuration("INTERNAL_ERROR", startedAt);
+			throw exception;
+		}
+	}
+
+	private IntegratedSearchResult search(SearchCriteria criteria, long startedAt) {
+		List<ActiveCatalogMapping> rows = metrics.stage("DATABASE", mappingReader::findAllActive);
+		Map<Supplier, List<PropertyMapping>> mappings = metrics.stage("MAPPING", () -> groupMappings(rows));
 		List<SupplierSearchPlan> plans = clients.stream()
 			.map(client -> plan(client, criteria, mappings.getOrDefault(
 				client.supplier(),
@@ -89,7 +112,7 @@ public class IntegratedSearchService {
 			.toList();
 
 		Duration remainingTimeout = remainingTimeout(startedAt);
-		List<BatchSearchOutcome> completed = remainingTimeout.isZero()
+		List<BatchSearchOutcome> completed = metrics.stage("SUPPLIERS", () -> remainingTimeout.isZero()
 			|| plans.isEmpty()
 			? List.of()
 			: Flux.fromIterable(plans)
@@ -97,46 +120,47 @@ public class IntegratedSearchService {
 				.flatMap(this::execute, clients.size())
 				.take(remainingTimeout)
 				.collectList()
-				.block();
+				.block());
 		List<BatchSearchOutcome> safeCompleted = completed == null
 			? List.of()
 			: completed;
-		List<SupplierSearchAggregate> aggregates = plans.stream()
-			.map(plan -> aggregate(plan, safeCompleted))
-			.toList();
-		List<SupplierSearchOutcome> supplierResults = enrichOutcomes(
-			aggregates,
-			rows
-		);
+		return metrics.stage("ASSEMBLY", () -> {
+			List<SupplierSearchAggregate> aggregates = plans.stream()
+				.map(plan -> aggregate(plan, safeCompleted))
+				.toList();
+			List<SupplierSearchOutcome> supplierResults = enrichOutcomes(
+				aggregates,
+				rows
+			);
 
-		IntegratedSearchResult result = new IntegratedSearchResult(
-			overallStatus(supplierResults),
-			supplierResults
-		);
-		log.info(
-			"Integrated Supplier search completed: status={}, acceptedOffers={}, elapsedMillis={}",
-			result.status(),
-			result.offers().size(),
-			Duration.ofNanos(System.nanoTime() - startedAt).toMillis()
-		);
-		return result;
+			IntegratedSearchResult result = new IntegratedSearchResult(
+				overallStatus(supplierResults),
+				supplierResults
+			);
+			log.info(
+				"Integrated Supplier search completed: status={}, acceptedOffers={}, elapsedMillis={}",
+				result.status(),
+				result.supplierResults().stream().mapToInt(SupplierSearchOutcome::acceptedOfferCount).sum(),
+				Duration.ofNanos(System.nanoTime() - startedAt).toMillis()
+			);
+			return result;
+		});
 	}
 
 	private List<SupplierSearchOutcome> enrichOutcomes(
 		List<SupplierSearchAggregate> aggregates,
 		List<ActiveCatalogMapping> mappings
 	) {
-		List<Offer> offers = aggregates.stream()
-			.flatMap(result -> result.offers().stream())
-			.toList();
-		if (offers.isEmpty()) {
+		Set<Long> offeredRoomTypeIds = new HashSet<>();
+		aggregates.forEach(result -> result.offers().forEach(
+			offer -> offeredRoomTypeIds.add(offer.roomTypeId())
+		));
+		if (offeredRoomTypeIds.isEmpty()) {
 			return aggregates.stream()
 				.map(aggregate -> aggregate.toOutcome(List.of()))
 				.toList();
 		}
 
-		Set<Long> offeredRoomTypeIds = new HashSet<>();
-		offers.forEach(offer -> offeredRoomTypeIds.add(offer.roomTypeId()));
 		Map<Long, ActiveCatalogMapping> catalogByRoomType = new HashMap<>();
 		for (ActiveCatalogMapping mapping : mappings) {
 			if (offeredRoomTypeIds.contains(mapping.roomTypeId())) {
@@ -185,11 +209,17 @@ public class IntegratedSearchService {
 		SupplierSearchClient client,
 		IndexedRequest indexedRequest
 	) {
-		return Mono.defer(() -> client.search(indexedRequest.request()))
+		return resources.execute(client.supplier(), SupplierOperation.SEARCH,
+			() -> Mono.defer(() -> client.search(indexedRequest.request()))
 			.switchIfEmpty(Mono.error(invalidResponse(
 				client.supplier(),
 				"Supplier search completed without a result"
 			)))
+			.doOnNext(result -> {
+				if (result.supplier() != client.supplier()) {
+					throw invalidResponse(client.supplier(), "Supplier search result did not match the requested supplier");
+				}
+			}))
 			.map(result -> successfulBatch(client, indexedRequest, result))
 			.onErrorResume(cause -> {
 				SupplierFailureType failureType = failureType(cause);
@@ -212,12 +242,6 @@ public class IntegratedSearchService {
 		IndexedRequest indexedRequest,
 		SupplierSearchResult result
 	) {
-		if (result.supplier() != client.supplier()) {
-			throw invalidResponse(
-				client.supplier(),
-				"Supplier search result did not match the requested supplier"
-			);
-		}
 		return BatchSearchOutcome.succeeded(
 			client.supplier(),
 			indexedRequest.index(),

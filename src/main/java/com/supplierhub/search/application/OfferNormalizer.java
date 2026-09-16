@@ -69,6 +69,7 @@ public final class OfferNormalizer {
 		Set<Offer> offers = new LinkedHashSet<>();
 		int rejectedOfferCount = 0;
 		int unavailableOfferCount = 0;
+		int duplicateOfferCount = 0;
 
 		for (int index = 0; index < sourceItems.size(); index++) {
 			OfferCandidate candidate;
@@ -89,7 +90,9 @@ public final class OfferNormalizer {
 				}
 				Optional<Offer> offer = normalize(criteria, candidate);
 				if (offer.isPresent()) {
-					offers.add(offer.orElseThrow());
+					if (!offers.add(offer.orElseThrow())) {
+						duplicateOfferCount++;
+					}
 				} else {
 					unavailableOfferCount++;
 				}
@@ -103,7 +106,8 @@ public final class OfferNormalizer {
 		return new OfferNormalizationResult(
 			List.copyOf(offers),
 			rejectedOfferCount,
-			unavailableOfferCount
+			unavailableOfferCount,
+			duplicateOfferCount
 		);
 	}
 

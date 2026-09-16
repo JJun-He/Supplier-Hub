@@ -9,6 +9,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.springframework.boot.test.system.CapturedOutput;
@@ -18,6 +19,7 @@ import reactor.core.publisher.Mono;
 
 import com.supplierhub.catalog.domain.CatalogSnapshot;
 import com.supplierhub.catalog.domain.Supplier;
+import com.supplierhub.supplier.common.SupplierResourceFixture;
 import com.supplierhub.supplier.common.SupplierCatalogClient;
 import com.supplierhub.supplier.common.SupplierFailureType;
 import com.supplierhub.supplier.common.SupplierIntegrationException;
@@ -25,6 +27,14 @@ import com.supplierhub.supplier.common.SupplierIntegrationProperties;
 
 @ExtendWith(OutputCaptureExtension.class)
 class CatalogSynchronizationServiceTests {
+
+	private final SupplierResourceFixture resourceFixture =
+		new SupplierResourceFixture();
+
+	@AfterEach
+	void closeCallResources() {
+		resourceFixture.close();
+	}
 
 	@Test
 	void retriesTransientFailureAndStoresSuccessfulSnapshot() {
@@ -190,6 +200,30 @@ class CatalogSynchronizationServiceTests {
 		assertThat(store.snapshots).hasSize(1);
 	}
 
+	@Test
+	void updatesFreshnessOnlyAfterSuccessfulStoreAndRetainsItOnFailure() {
+		var snapshot = emptySnapshot(Supplier.SUPPLIER_A);
+		var source = client(Supplier.SUPPLIER_A, Mono.just(snapshot));
+		var registry = resourceFixture.registry;
+		var lastSuccess = registry.get("supplier.catalog.last.success")
+			.tag("supplier", "SUPPLIER_A").gauge();
+		var failures = registry.get("supplier.catalog.consecutive.failures")
+			.tag("supplier", "SUPPLIER_A").gauge();
+		CatalogSnapshotStore failingStore = ignored -> {
+			throw new CatalogSnapshotRejectedException("rejected snapshot");
+		};
+		service(List.of(source), failingStore).synchronizeAll();
+		assertThat(lastSuccess.value()).isZero();
+		assertThat(failures.value()).isEqualTo(1);
+		service(List.of(source), new RecordingSnapshotStore()).synchronizeAll();
+		double successfulTime = lastSuccess.value();
+		assertThat(successfulTime).isPositive();
+		assertThat(failures.value()).isZero();
+		service(List.of(source), failingStore).synchronizeAll();
+		assertThat(lastSuccess.value()).isEqualTo(successfulTime);
+		assertThat(failures.value()).isEqualTo(1);
+	}
+
 	private CatalogSynchronizationService service(
 		List<SupplierCatalogClient> clients,
 		CatalogSnapshotStore store
@@ -245,7 +279,7 @@ class CatalogSynchronizationServiceTests {
 				4
 			)
 		);
-		return new CatalogSynchronizationService(clients, store, properties);
+		return new CatalogSynchronizationService(clients, store, properties, resourceFixture.resources, resourceFixture.metrics);
 	}
 
 	private SupplierCatalogClient client(

@@ -32,6 +32,14 @@ import com.supplierhub.supplier.supplierb.SupplierBSearchClient;
 
 class SupplierSearchClientTests {
 
+	private final SupplierResourceFixture resourceFixture =
+		new SupplierResourceFixture();
+
+	@AfterEach
+	void closeCallResources() {
+		resourceFixture.close();
+	}
+
 	private static final SearchCriteria CRITERIA = new SearchCriteria(
 		LocalDate.of(2026, 9, 1),
 		LocalDate.of(2026, 9, 4),
@@ -269,8 +277,7 @@ class SupplierSearchClientTests {
 		return new SupplierASearchClient(
 			configuration.supplierASearchWebClient(
 				WebClient.builder(),
-				properties
-			),
+				properties, resourceFixture.resources),
 			properties
 		);
 	}
@@ -281,8 +288,7 @@ class SupplierSearchClientTests {
 		return new SupplierBSearchClient(
 			configuration.supplierBSearchWebClient(
 				WebClient.builder(),
-				properties
-			),
+				properties, resourceFixture.resources),
 			properties
 		);
 	}

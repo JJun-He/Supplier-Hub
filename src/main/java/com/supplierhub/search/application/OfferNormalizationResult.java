@@ -8,7 +8,8 @@ import com.supplierhub.search.domain.Offer;
 public record OfferNormalizationResult(
 	List<Offer> offers,
 	int rejectedOfferCount,
-	int unavailableOfferCount
+	int unavailableOfferCount,
+	int duplicateOfferCount
 ) {
 
 	public OfferNormalizationResult {
@@ -21,7 +22,7 @@ public record OfferNormalizationResult(
 				"rejectedOfferCount must not be negative"
 			);
 		}
-		if (unavailableOfferCount < 0) {
+		if (unavailableOfferCount < 0 || duplicateOfferCount < 0) {
 			throw new IllegalArgumentException(
 				"unavailableOfferCount must not be negative"
 			);

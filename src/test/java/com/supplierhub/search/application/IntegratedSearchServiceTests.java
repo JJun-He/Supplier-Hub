@@ -18,11 +18,13 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
 import java.util.stream.IntStream;
 
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
 import reactor.core.publisher.Mono;
 
 import com.supplierhub.catalog.domain.Supplier;
+import com.supplierhub.supplier.common.SupplierResourceFixture;
 import com.supplierhub.catalog.application.ActiveCatalogMapping;
 import com.supplierhub.catalog.application.ActiveCatalogMappingReader;
 import com.supplierhub.search.domain.DailyInventory;
@@ -38,6 +40,14 @@ import com.supplierhub.supplier.common.SupplierSearchRequest;
 import com.supplierhub.supplier.common.SupplierSearchResult;
 
 class IntegratedSearchServiceTests {
+
+	private final SupplierResourceFixture resourceFixture =
+		new SupplierResourceFixture();
+
+	@AfterEach
+	void closeCallResources() {
+		resourceFixture.close();
+	}
 
 	private static final SearchCriteria CRITERIA = new SearchCriteria(
 		LocalDate.of(2026, 10, 1),
@@ -243,8 +253,7 @@ class IntegratedSearchServiceTests {
 				request.supplier(),
 				List.of(),
 				2,
-				3
-			))
+				3, 0))
 		);
 		IntegratedSearchService service = service(
 			List.of(client),
@@ -338,8 +347,7 @@ class IntegratedSearchServiceTests {
 		assertThatThrownBy(() -> new IntegratedSearchService(
 			mappingReader,
 			List.of(supplierAClient),
-			properties(Duration.ofSeconds(1), 4, true, true)
-		))
+			properties(Duration.ofSeconds(1), 4, true, true), resourceFixture.resources, resourceFixture.metrics))
 			.isInstanceOf(IllegalArgumentException.class)
 			.hasMessageContaining("SUPPLIER_B");
 	}
@@ -365,8 +373,7 @@ class IntegratedSearchServiceTests {
 		IntegratedSearchService service = new IntegratedSearchService(
 			mappingReader,
 			List.of(supplierAClient, supplierBClient),
-			properties(Duration.ofSeconds(1), 4, true, false)
-		);
+			properties(Duration.ofSeconds(1), 4, true, false), resourceFixture.resources, resourceFixture.metrics);
 
 		IntegratedSearchResult result = service.search(CRITERIA);
 
@@ -412,8 +419,7 @@ class IntegratedSearchServiceTests {
 				maxConcurrency,
 				supplierAEnabled,
 				supplierBEnabled
-			)
-		);
+			), resourceFixture.resources, resourceFixture.metrics);
 	}
 
 	private SupplierSearchClient client(
@@ -438,8 +444,7 @@ class IntegratedSearchServiceTests {
 			supplier,
 			List.of(offers),
 			0,
-			0
-		);
+			0, 0);
 	}
 
 	private SupplierIntegrationException failure(

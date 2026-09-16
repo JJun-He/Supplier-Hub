@@ -13,8 +13,12 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.client.reactive.ReactorClientHttpConnector;
 import org.springframework.web.reactive.function.client.WebClient;
 
+import com.supplierhub.catalog.domain.Supplier;
+
 @Configuration(proxyBeanMethods = false)
-@EnableConfigurationProperties(SupplierIntegrationProperties.class)
+@EnableConfigurationProperties({
+	SupplierIntegrationProperties.class, SupplierResourceProperties.class
+})
 public class SupplierClientConfiguration {
 
 	private static final String API_KEY_HEADER = "X-Api-Key";
@@ -23,13 +27,15 @@ public class SupplierClientConfiguration {
 	@Qualifier("supplierAWebClient")
 	WebClient supplierAWebClient(
 		WebClient.Builder builder,
-		SupplierIntegrationProperties properties
+		SupplierIntegrationProperties properties,
+		SupplierCallResources resources
 	) {
 		return createWebClient(
 			builder,
 			properties.a(),
 			properties.catalog().connectTimeout(),
-			properties.catalog().responseTimeout()
+			properties.catalog().responseTimeout(),
+			resources, Supplier.SUPPLIER_A, SupplierOperation.CATALOG
 		);
 	}
 
@@ -37,13 +43,15 @@ public class SupplierClientConfiguration {
 	@Qualifier("supplierBWebClient")
 	WebClient supplierBWebClient(
 		WebClient.Builder builder,
-		SupplierIntegrationProperties properties
+		SupplierIntegrationProperties properties,
+		SupplierCallResources resources
 	) {
 		return createWebClient(
 			builder,
 			properties.b(),
 			properties.catalog().connectTimeout(),
-			properties.catalog().responseTimeout()
+			properties.catalog().responseTimeout(),
+			resources, Supplier.SUPPLIER_B, SupplierOperation.CATALOG
 		);
 	}
 
@@ -51,13 +59,15 @@ public class SupplierClientConfiguration {
 	@Qualifier("supplierASearchWebClient")
 	WebClient supplierASearchWebClient(
 		WebClient.Builder builder,
-		SupplierIntegrationProperties properties
+		SupplierIntegrationProperties properties,
+		SupplierCallResources resources
 	) {
 		return createWebClient(
 			builder,
 			properties.a(),
 			properties.search().connectTimeout(),
-			properties.search().responseTimeout()
+			properties.search().responseTimeout(),
+			resources, Supplier.SUPPLIER_A, SupplierOperation.SEARCH
 		);
 	}
 
@@ -65,13 +75,15 @@ public class SupplierClientConfiguration {
 	@Qualifier("supplierBSearchWebClient")
 	WebClient supplierBSearchWebClient(
 		WebClient.Builder builder,
-		SupplierIntegrationProperties properties
+		SupplierIntegrationProperties properties,
+		SupplierCallResources resources
 	) {
 		return createWebClient(
 			builder,
 			properties.b(),
 			properties.search().connectTimeout(),
-			properties.search().responseTimeout()
+			properties.search().responseTimeout(),
+			resources, Supplier.SUPPLIER_B, SupplierOperation.SEARCH
 		);
 	}
 
@@ -79,16 +91,23 @@ public class SupplierClientConfiguration {
 		WebClient.Builder builder,
 		SupplierIntegrationProperties.Endpoint endpoint,
 		Duration connectTimeout,
-		Duration responseTimeout
+		Duration responseTimeout,
+		SupplierCallResources resources,
+		Supplier supplier,
+		SupplierOperation operation
 	) {
-		HttpClient httpClient = HttpClient.create()
+		HttpClient httpClient = HttpClient.create(resources.pool(supplier, operation))
+			.disableRetry(true)
 			.option(
 				ChannelOption.CONNECT_TIMEOUT_MILLIS,
 				Math.toIntExact(connectTimeout.toMillis())
 			)
 			.responseTimeout(responseTimeout);
 
-		return builder
+		return builder.clone()
+			.codecs(codecs -> codecs.defaultCodecs().maxInMemorySize(
+				resources.maxResponseBytes(supplier, operation)
+			))
 			.baseUrl(endpoint.baseUrl().toString())
 			.defaultHeader(HttpHeaders.ACCEPT, "application/json")
 			.defaultHeader(API_KEY_HEADER, endpoint.apiKey())

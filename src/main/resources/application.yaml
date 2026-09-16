@@ -31,7 +31,7 @@ management:
   endpoints:
     web:
       exposure:
-        include: health, info
+        include: health, info, metrics
 
 supplier:
   a:
@@ -59,3 +59,15 @@ supplier:
     call-timeout: ${SUPPLIER_SEARCH_CALL_TIMEOUT:3s}
     overall-timeout: ${SUPPLIER_SEARCH_OVERALL_TIMEOUT:5s}
     max-concurrency: ${SUPPLIER_SEARCH_MAX_CONCURRENCY:4}
+
+  resources:
+    search:
+      max-concurrent-calls: ${SUPPLIER_SEARCH_GLOBAL_CONCURRENCY:8}
+      max-response-bytes: ${SUPPLIER_SEARCH_MAX_RESPONSE_BYTES:2097152}
+      pending-acquire-max-count: ${SUPPLIER_SEARCH_POOL_PENDING_COUNT:8}
+      pending-acquire-timeout: ${SUPPLIER_SEARCH_POOL_ACQUIRE_TIMEOUT:200ms}
+    catalog:
+      max-concurrent-calls: ${SUPPLIER_CATALOG_GLOBAL_CONCURRENCY:1}
+      max-response-bytes: ${SUPPLIER_CATALOG_MAX_RESPONSE_BYTES:8388608}
+      pending-acquire-max-count: ${SUPPLIER_CATALOG_POOL_PENDING_COUNT:1}
+      pending-acquire-timeout: ${SUPPLIER_CATALOG_POOL_ACQUIRE_TIMEOUT:200ms}

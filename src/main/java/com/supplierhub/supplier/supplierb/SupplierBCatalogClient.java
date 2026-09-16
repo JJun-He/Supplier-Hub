@@ -54,6 +54,13 @@ public class SupplierBCatalogClient implements SupplierCatalogClient {
 			.switchIfEmpty(Mono.error(invalidResponse()))
 			.map(this::toSnapshot)
 			.onErrorMap(
+				cause -> !(cause instanceof SupplierIntegrationException)
+					&& SupplierTransportFailureMapper.isResourceFailure(cause),
+				cause -> SupplierTransportFailureMapper.resourceFailure(
+					supplier(), "Supplier request", cause
+				)
+			)
+			.onErrorMap(
 				WebClientRequestException.class,
 				cause -> SupplierTransportFailureMapper.requestFailure(
 					supplier(),

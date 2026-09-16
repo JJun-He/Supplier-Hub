@@ -105,7 +105,7 @@ curl -X POST 'http://localhost:18080/control/b/mode?value=normal'
 ./gradlew test
 ```
 
-2026-09-16의 8-A 검증 결과는 메인 214개·Mock 6개 통과이며 실패·오류·건너뜀은 없습니다. parameterized test의 각 입력 사례를 포함한 실행 건수입니다. 변경과 검증 기록은 [JOURNAL](JOURNAL.md), 감사 당시 검증과 한계는 [구조 감사](docs/structure-audit.md)에 있습니다.
+2026-09-16의 8-B 검증 결과는 메인 232개·Mock 6개 통과이며 실패·오류·건너뜀은 없습니다. parameterized test의 각 입력 사례를 포함한 실행 건수입니다. 변경과 검증 기록은 [JOURNAL](JOURNAL.md), 감사 당시 검증과 한계는 [구조 감사](docs/structure-audit.md)에 있습니다.
 
 실행 중인 두 `bootRun`은 각각 Ctrl+C로 종료합니다. DB 종료 명령은 다음과 같으며 데이터 볼륨은 유지됩니다.
 
@@ -129,18 +129,26 @@ docker compose down
 
 ## 다음 작업과 기술 선택
 
-8-A의 엄격한 입력 파싱·항목별 격리·중복/충돌 정책·URI·카탈로그 계약 검사는 완료했습니다.
+8-A 입력/예외 계약과 리뷰 보완, 8-B 전역 호출 제한·응답 크기·업무 지표를 완료했습니다.
 
-1. **8-B:** Supplier별 전역 호출 제한, 응답 크기 정책, 업무 실패 지표
-2. **8-C:** 동기화 동시 실행 지원 범위와 DB 시간 예산
-3. **8-D:** 실제 DB·Mock·고객 API 전체 연결 검증
-4. **9단계:** 실행 절차 재검증과 최종 설계·운영 한계 문서화
+1. **8-C:** 동기화 동시 실행 지원 범위와 DB 시간 예산
+2. **8-D:** 실제 DB·Mock·고객 API 전체 연결 검증
+3. **9단계:** 실행 절차 재검증과 최종 설계·운영 한계 문서화
 
-현재 호출 동시성 4개 제한은 고객 요청마다 적용됩니다. 정상적인 큰 응답이 codec 한도를 넘는 문제도 남아 있습니다. 감사 보고서의 본문은 감사 시점 기록이며, 수정 상태는 각 문서 상단 안내와 구현 진행표로 구분합니다.
+요청당 Supplier 동시 호출은 4개이며, JVM 전체에서 Supplier별 검색 8개·카탈로그 1개로 추가 제한합니다. 한도를 넘으면 대기열 없이 `CAPACITY_EXCEEDED`로 분류하고 정상 Supplier 결과는 유지합니다. 응답 한도는 검색 2 MiB·카탈로그 8 MiB이며 초과하면 `RESPONSE_TOO_LARGE`입니다. 설정과 검증 범위는 [설계 §17](docs/architecture-decisions.md#17-8-b-자원-제한과-업무-지표)을 참고하세요. 감사 보고서의 본문은 감사 시점 기록이며, 수정 상태는 각 문서 상단 안내와 구현 진행표로 구분합니다.
 
-SpringDoc/Swagger는 아직 도입하지 않았습니다. 공개 검색 endpoint가 하나인 현재는 위 요청 예시를 제공하고, 응답 계약 안정화 후 자동 문서 추가를 검토합니다. Resilience4j도 아직 사용하지 않습니다. 카탈로그는 Reactor의 제한 retry를 사용하고, 검색은 추가 retry 없이 timeout과 부분 결과를 사용합니다. 전역 허용량과 관측을 먼저 보완하고 반복 장애 양상을 확인한 뒤 circuit breaker 도입을 판단합니다.
+SpringDoc/Swagger는 아직 도입하지 않았습니다. 공개 검색 endpoint가 하나인 현재는 위 요청 예시를 제공하고, 응답 계약 안정화 후 자동 문서 추가를 검토합니다. Resilience4j도 아직 사용하지 않습니다. 카탈로그는 Reactor의 제한 retry를 사용하고, 검색은 추가 retry 없이 timeout과 부분 결과를 사용합니다. 전역 허용량과 지표를 바탕으로 반복 장애 양상을 확인한 뒤 circuit breaker 도입을 판단합니다.
 
-현재 Actuator HTTP 노출은 `health`, `info`입니다. Supplier 업무 지표와 대시보드가 구현됐다는 뜻은 아닙니다.
+Actuator HTTP 노출은 `health`, `info`, `metrics`입니다. 검색·Supplier 호출·중복/거부 Offer·카탈로그 신선도 지표를 제공합니다. 카탈로그의 잘못된 항목이 계속되면 기존 매핑으로 검색하면서 갱신 성공이 멈출 수 있으므로 마지막 저장 성공 시각과 연속 실패를 함께 확인합니다. 지표는 프로세스 재시작 시 초기화되며 별도 대시보드는 없습니다.
+
+```sh
+curl -s http://localhost:8080/actuator/metrics/supplier.calls
+curl -s 'http://localhost:8080/actuator/metrics/supplier.offers?tag=outcome:DUPLICATE'
+curl -s http://localhost:8080/actuator/metrics/supplier.catalog.last.success
+curl -s http://localhost:8080/actuator/metrics/supplier.catalog.consecutive.failures
+```
+
+`last.success`는 epoch seconds이며 0은 이 프로세스에서 저장 성공이 아직 없다는 뜻입니다. `supplier.calls`의 COUNT는 호출 시도 건수이고, 최종 검색 실패 유형은 `supplier.search.failures`에서 확인합니다.
 
 ## 문서 안내
 

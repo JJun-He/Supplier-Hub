@@ -343,6 +343,9 @@ UNAVAILABLE
 TIMEOUT
 INVALID_RESPONSE
 CATALOG_UNAVAILABLE
+CAPACITY_EXCEEDED
+RESPONSE_TOO_LARGE
+INTERNAL_ERROR
 UNKNOWN
 ```
 
@@ -434,7 +437,7 @@ Supplier 요청을 만들기 위해 활성 매핑 전체를 읽는 것은 최소
 
 모든 묶음을 무제한 병렬 호출하면 한 번의 고객 요청이 Supplier 호출 폭증과 호출 한도 초과를 일으킬 수 있다. 모두 순차 호출하면 숙소 수에 비례해 검색 시간이 길어진다. 제한 병렬성은 두 위험 사이의 명시적인 절충이며 Supplier별 설정으로 분리한다.
 
-현재 최대 4개 제한은 한 고객 검색 요청 안에서 Supplier별로 적용한다. 여러 고객 요청을 합친 프로세스 전체 동시 호출 제한은 8단계에서 bulkhead와 지표를 추가할 때 별도로 다룬다.
+현재 최대 4개 제한은 한 고객 검색 요청 안에서 Supplier별로 적용한다. 여러 고객을 합친 JVM 호출 한도는 8-B에서 Supplier별 검색 8개로 추가했다. 설정과 지표는 §17을 참고한다.
 
 일부 묶음이 실패해도 완료된 묶음의 Offer는 유지한다. 정상 결과가 하나라도 있고 일부가 실패하면 해당 Supplier와 전체 검색을 `PARTIAL`로 표시한다.
 
@@ -568,9 +571,9 @@ Supplier 응답은 어댑터 안에서 Jackson 3 `JsonNode`로 읽는다. 공통
 - 검색에서 JSON 문법이나 최상위 응답 구조가 잘못되면 배치가 `INVALID_RESPONSE`로 실패한다. 분리 가능한 항목의 타입·날짜·값 오류는 `OfferMappingException`으로 표시하여 그 항목만 거부한다.
 - 카탈로그는 누락 판정에 쓰는 전체 snapshot이다. 잘못된 항목을 조용히 빼면 기존 매핑을 비활성화할 수 있으므로 하나라도 잘못되면 snapshot 전체를 거부한다.
 
-잘못된 항목이 계속 반환되면 주기적 동기화 시도는 계속되지만 성공한 snapshot의 갱신은 멈춘다. 기존 매핑으로 검색을 제공하는 대신 데이터가 오래될 수 있다. 마지막 동기화 성공 시각과 연속 실패 신호는 8-B에서 추가한다.
+잘못된 항목이 계속 반환되면 주기적 동기화 시도는 계속되지만 성공한 snapshot의 갱신은 멈춘다. 기존 매핑으로 검색을 제공하는 대신 데이터가 오래될 수 있다. 마지막 저장 성공 시각과 연속 실패 신호는 8-B에서 추가했다(§17).
 
-응답을 메모리에 모으는 방식은 유지한다. 응답 크기 한도·전역 동시성·메모리 비용은 8-B에서 별도로 검증한다. Jackson 2가 간접 의존성에 있어도 실제 Boot WebClient는 Jackson 3을 사용하므로, 회귀 테스트는 애플리케이션에 주입되는 실제 client를 사용한다.
+응답을 메모리에 모으는 방식은 유지한다. 응답 크기 한도·전역 동시성·메모리 범위는 8-B에서 검증하고 §17에 기록했다. Jackson 2가 간접 의존성에 있어도 실제 Boot WebClient는 Jackson 3을 사용하므로, 회귀 테스트는 애플리케이션에 주입되는 실제 client를 사용한다.
 
 ### 16.2 중복과 객실 속성 충돌
 
@@ -592,9 +595,9 @@ Supplier 응답은 어댑터 안에서 Jackson 3 `JsonNode`로 읽는다. 공통
 
 B의 HTTP 200 본문 실패 코드 매핑은 B 전용 매퍼 하나로 합쳤다. HTTP 상태, B 본문 코드, transport timeout은 각각의 계약 경계에서 변환한다.
 
-JSON 타입 검사와 외부 값의 도메인 검증은 `InvalidValueException`으로 명시한다. 금액 overflow는 정확한 덧셈 지점에서 이 예외로 변환한다. 검색은 이 예외만 항목 거부로, 카탈로그는 snapshot 거부로 변환한다. 내부 식별자·계산 결과 불변식 검증은 일반 예외로 남긴다. 예상 밖 mapper의 NPE·상태 오류·일반 IllegalArgumentException을 잘못된 외부 항목으로 숨기지 않는다. 검색 배치나 카탈로그 처리에서 분류되지 않은 내부 예외는 `INTERNAL_ERROR`와 ERROR 로그로 기록하고 원인 stack trace를 보존한다. 정상 Supplier 결과는 유지한다. 알려지지 않은 HTTP 상태와 별도 분류되지 않은 WebClient 응답 읽기 실패는 `UNKNOWN`으로 구분한다. 버퍼 초과의 전용 분류는 8-B에서 보완한다.
+JSON 타입 검사와 외부 값의 도메인 검증은 `InvalidValueException`으로 명시한다. 금액 overflow는 정확한 덧셈 지점에서 이 예외로 변환한다. 검색은 이 예외만 항목 거부로, 카탈로그는 snapshot 거부로 변환한다. 내부 식별자·계산 결과 불변식 검증은 일반 예외로 남긴다. 예상 밖 mapper의 NPE·상태 오류·일반 IllegalArgumentException을 잘못된 외부 항목으로 숨기지 않는다. 검색 배치나 카탈로그 처리에서 분류되지 않은 내부 예외는 `INTERNAL_ERROR`와 ERROR 로그로 기록하고 원인 stack trace를 보존한다. 정상 Supplier 결과는 유지한다. 알려지지 않은 HTTP 상태와 별도 분류되지 않은 WebClient 응답 읽기 실패는 `UNKNOWN`으로 구분한다. 버퍼 초과는 8-B에서 RESPONSE_TOO_LARGE로 보완했다.
 
-`INTERNAL_ERROR`는 고객 응답의 `supplierResults[].failureTypes[]`에 추가된 enum이다. 부분 실패는 HTTP 200/`PARTIAL`, 모든 조회 실패는 HTTP 503/`FAILED`를 유지한다. 내부 예외 메시지·stack trace는 고객 응답에 넣지 않는다. Supplier 실패 지표는 아직 8-B 작업이다.
+`INTERNAL_ERROR`는 고객 응답의 `supplierResults[].failureTypes[]`에 추가된 enum이다. 부분 실패는 HTTP 200/`PARTIAL`, 모든 조회 실패는 HTTP 503/`FAILED`를 유지한다. 내부 예외 메시지·stack trace는 고객 응답에 넣지 않는다. Supplier 실패 지표는 8-B에서 구현했다(§17).
 
 ### 16.5 검증 위치
 
@@ -609,3 +612,79 @@ JSON 타입 검사와 외부 값의 도메인 검증은 `InvalidValueException`�
 | `INTERNAL_ERROR`의 부분·전체 실패 JSON 및 HTTP 계약 | `StaySearchControllerTests` |
 
 이 검증은 실제 DB→별도 Mock 프로세스→고객 HTTP 요청을 모두 연결한 8-D E2E를 대체하지 않는다.
+
+
+## 17. 8-B 자원 제한과 업무 지표
+
+2026-09-16에 적용했다. 8-A 리뷰 보완과 별도 변경으로 관리한다.
+
+### 17.1 호출 수와 연결 풀
+
+`SupplierCallResources`는 JVM 안에서 Supplier·작업(SEARCH/CATALOG)별로 공유한다. 검색 서비스의 배치 실행과 카탈로그 서비스의 각 HTTP 시도를 감싸므로 고객 요청이 늘어도 동일한 허용량을 사용한다. 숙소 단위 50개 분할과 요청당 Supplier 동시 4개 규칙은 유지한다.
+
+| 설정 | 검색 | 카탈로그 |
+| --- | ---: | ---: |
+| Supplier별 동시에 수용하는 호출 | 8 | 1 |
+| Supplier별 최대 연결 수 | 8 | 1 |
+| 연결 획득 대기 개수 | 8 | 1 |
+| 연결 획득 대기 시간 | 200ms | 200ms |
+| 응답 codec 한도 | 2 MiB | 8 MiB |
+
+- 기본값은 `supplier.resources.search` / `supplier.resources.catalog`에서 바꾼다. 무제한을 뜻하는 음수·0을 허용하지 않는다. Supplier마다 독립된 자원이지만 현재 설정값은 A/B에 동일하게 적용한다.
+- 애플리케이션 허용량에는 대기열을 두지 않는다. 구독 시 `tryAcquire`로 즉시 수용하거나 `CAPACITY_EXCEEDED`로 거부한다. 이벤트 루프에서 blocking acquire를 호출하지 않는다. 짧은 폭주에서도 일부 결과가 빠질 수 있지만 대기 작업이 무한히 쌓이지 않는다. 공정한 고객별 할당을 보장하는 정책은 아니다.
+- `Mono.using`의 eager 정리로 정상·오류 신호가 다음 처리에 전달되기 전에 허용량을 반환한다. 구독 취소와 Publisher 생성 전 동기 예외도 반환 경로에 포함한다. 응답 읽기와 파싱·정규화가 완료될 때까지 허용량을 유지한다.
+- A/B와 검색/카탈로그의 ConnectionProvider를 분리한다. 같은 호스트 주소를 사용해도 검색이 다른 Supplier나 카탈로그의 연결을 점유하지 않는다. 컨텍스트 종료 시 소유한 풀을 정리한다.
+- 연결 풀의 pending 한도는 허용량 반환과 실제 연결 반환 사이의 짧은 경계 및 직접 client 사용을 위한 추가 보호다. 로컬 연결 획득 대기 초과·대기열 초과는 원인 체인을 확인해 `CAPACITY_EXCEEDED`로 분류한다. Reactor Netty 1.3.x의 shaded pool 예외 의존은 transport mapper 한곳에 둔다.
+- HTTP client의 연결 reset 자동 재전송을 끈다. 검색은 재시도하지 않는다. 카탈로그의 기존 제한 retry만 유지하며 각 시도마다 허용량을 다시 얻는다. 크기 초과와 로컬 용량 부족은 즉시 retry하지 않는다.
+
+풀 설정과 자원 생명주기는 [Reactor Netty 공식 문서](https://projectreactor.io/docs/netty/release/reference/http-client.html#_connection_pool)를 기준으로 현재 의존성의 실제 HTTP 동작을 검증했다.
+
+### 17.2 응답 크기와 메모리 범위
+
+`WebClient.Builder.clone()`으로 각 client의 codec 한도를 분리한다. 검색 2 MiB는 50개 숙소 × 5개 객실 × 30박의 정상 응답, 카탈로그 8 MiB는 숙소 3,000개 fixture를 수용한다. fixture 수용과 모든 형태의 수천 개 숙소 지원을 같은 의미로 보지 않는다. 객실·요금제·문자열 길이에 따라 한도를 넘을 수 있다.
+
+`DataBufferLimitException`은 직접 발생하거나 다른 예외의 원인으로 감싸져도 `RESPONSE_TOO_LARGE`로 변환한다. 카탈로그의 일부만 저장하거나 같은 큰 응답을 즉시 재시도하지 않는다. 다음 정상 응답은 같은 자원으로 처리할 수 있다. codec 설정은 [Spring 공식 문서](https://docs.spring.io/spring-framework/reference/web/webflux-webclient/client-builder.html#webflux-client-builder-maxinmemorysize)의 유한한 버퍼 한도를 사용한다.
+
+기본 설정에서 두 Supplier의 수용 호출 수 × 응답 한도는 검색 32 MiB + 카탈로그 16 MiB = 48 MiB다. 이는 설정값의 단순 곱이며 실제 peak heap 상한이 아니다. JsonNode와 도메인 객체, 이미 완료된 배치 결과, DB 매핑, Netty 버퍼·HTTP 헤더와 요청별 최종 응답은 추가 비용이다. 애플리케이션 전체 메모리 제한이나 부하 용량을 실측했다고 주장하지 않는다.
+
+로그 건수 계산용 Offer 평탄화 목록과 메타데이터 조인용 임시 Offer 목록은 제거했다. 일별 가격 근거, 검증 불변식, 최종 결과 정렬은 유지했다.
+
+### 17.3 업무 지표와 해석
+
+Actuator HTTP 노출은 `health`, `info`, `metrics`다. 대시보드·외부 trace exporter는 추가하지 않았다.
+
+| 지표 | 의미 |
+| --- | --- |
+| `supplier.calls` | 수용·거부된 호출 시도의 시간과 건수. supplier/operation/outcome/failure 태그 |
+| `supplier.calls.active` | Supplier·작업별 현재 허용량을 점유한 호출 수 |
+| `supplier.offers` | ACCEPTED/REJECTED/UNAVAILABLE/DUPLICATE 건수 |
+| `supplier.search.results` | 검색 요청별 Supplier 최종 상태 건수 |
+| `supplier.search.failures` | 검색 요청별 Supplier에 발생한 실패 유형. 같은 유형은 요청 내 한 번 |
+| `search.requests` | 검색 서비스 전체 시간·최종 상태. 내부 오류도 별도 기록 |
+| `search.stages` | DATABASE/MAPPING/SUPPLIERS/ASSEMBLY 구간 시간 |
+| `supplier.catalog.sync` | HTTP 시도·retry·저장까지 포함하는 Supplier별 동기화 시간·결과 |
+| `supplier.catalog.last.success` | 저장 성공 후 기록한 epoch seconds. 이 프로세스에서 성공한 적이 없으면 0 |
+| `supplier.catalog.consecutive.failures` | 연속 동기화 실패 횟수. 저장 성공 시 0으로 초기화 |
+| `reactor.netty.connection.provider.*` | 분리한 연결 풀의 active/idle/pending 등 기본 지표 |
+
+- HTTP 200 안의 B E503은 `supplier.calls`에서 FAILED/UNAVAILABLE이다. 잘못된 항목을 제외하고 정상 Offer를 반환한 호출은 PARTIAL/INVALID_RESPONSE다.
+- 완전 중복은 `duplicateOfferCount`와 DUPLICATE 지표로 관측한다. 고객 응답 필드에는 추가하지 않으며, 중복만으로 거부 건수나 PARTIAL 상태를 늘리지 않는다.
+- 검색 전체 deadline에서 취소된 진행 호출은 CANCELLED로 기록한다. 시작되지 않은 배치는 호출 시도가 아니므로 `supplier.calls`에 넣지 않는다. 최종 Supplier 결과와 `supplier.search.failures`에는 TIMEOUT이 남는다.
+- 카탈로그 HTTP 성공만으로 마지막 동기화 성공 시각을 갱신하지 않는다. snapshot 저장이 실패하면 이전 성공 시각을 유지하고 실패 횟수를 올린다. 이 지표는 메모리에 있으며 재시작하면 초기화된다.
+- 사용자 입력·숙소 코드·객실 ID·예외 메시지는 업무 지표 태그로 쓰지 않는다. 풀 지표의 주소는 설정된 Supplier 주소다.
+
+### 17.4 검증과 남은 경계
+
+정식 검증 위치:
+
+- `SupplierCallResourcesTests`: 구독 전 미점유, 즉시 재구독 100회, 동기 오류·취소 후 반환, 거부한 작업 미실행, 유한한 설정 검증.
+- `SupplierResourceIntegrationTests`: 실제 HTTP와 공유 검색 서비스에서 A의 2개 호출을 유지한 채 추가 고객 6명의 요청 거부·B 결과 보존, 같은 주소의 카탈로그 격리, 전체 timeout의 소켓 종료·용량 반환·다음 호출 회복, 본문 실패 지표, 큰 정상 응답, 크기 초과 후 회복, 실제 풀 pending 초과·획득 timeout 분류, 중복 지표.
+- `SupplierAdapterContractTests.ResponseSizes`: 실제 Boot에 주입된 codec으로 큰 카탈로그·30박 검색 수용, A/B 검색·카탈로그의 한도 초과 분류.
+- `CatalogSynchronizationServiceTests`: 저장 성공/실패에 따른 신선도와 연속 실패 지표.
+- `StaySearchControllerTests`: 새 두 실패 유형의 부분 실패 HTTP 200·전체 실패 HTTP 503 응답 계약.
+
+메인 232개·Mock 6개 통과, 실패·오류·건너뜀 0개다. 변경 없는 Mock은 최종 실행에서 up-to-date였으며 이 세션의 리뷰 보완 전체 실행에서 6개 성공을 확인했다.
+
+이 한도는 JVM·Supplier·작업별 외부 호출 보호다. DB 조회 이전의 고객 검색 진입 제한, 다중 JVM 합산 한도, 고객 연결 종료의 즉시 취소, 최종 응답 직렬화 비용은 해결하지 않았다. 카탈로그 허용량은 HTTP 시도에 적용되며 snapshot 저장까지 직렬화하는 DB lock을 대체하지 않는다. DB 동시 실행 정책·DB/pool 시간 예산은 8-C에 남는다. 전체 5초는 아직 HTTP 응답 완료까지의 엄격한 상한이 아니다.
+
+실제 DB→별도 Mock 프로세스→고객 API의 최종 연결 검증과 실행 명령 재현은 각각 8-D와 9단계에서 수행한다. 캐시, circuit breaker, 분산 제한, 전체 WebFlux 전환은 이번 범위에 추가하지 않았다.

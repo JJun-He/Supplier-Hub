@@ -22,6 +22,14 @@ import com.supplierhub.supplier.supplierb.SupplierBCatalogClient;
 
 class SupplierCatalogClientTests {
 
+	private final SupplierResourceFixture resourceFixture =
+		new SupplierResourceFixture();
+
+	@AfterEach
+	void closeCallResources() {
+		resourceFixture.close();
+	}
+
 	private HttpServer server;
 	private int responseStatus;
 	private String responseBody;
@@ -208,8 +216,8 @@ class SupplierCatalogClientTests {
 		);
 		SupplierClientConfiguration configuration = new SupplierClientConfiguration();
 		return supplierA
-			? configuration.supplierAWebClient(WebClient.builder(), properties)
-			: configuration.supplierBWebClient(WebClient.builder(), properties);
+			? configuration.supplierAWebClient(WebClient.builder(), properties, resourceFixture.resources)
+			: configuration.supplierBWebClient(WebClient.builder(), properties, resourceFixture.resources);
 	}
 
 	private void respondWith(int status, String body) {

@@ -11,8 +11,8 @@ import com.supplierhub.supplier.common.SupplierSearchRequest.RoomTypeMapping;
 
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Nested;
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.CsvSource;
@@ -301,12 +301,15 @@ class SupplierAdapterContractTests {
 			assertThat(result.offers())
 					.singleElement()
 					.satisfies(
-							offer -> assertThat(offer.price().totalAmount().amount()).isEqualTo(1100));
+							offer ->
+									assertThat(offer.price().totalAmount().amount())
+											.isEqualTo(1100));
 			assertThat(result.rejectedOfferCount()).isEqualTo(1);
 		}
 
 		@ParameterizedTest
-		@MethodSource("com.supplierhub.supplier.common.SupplierAdapterContractTests#invalidEnvelopes")
+		@MethodSource(
+				"com.supplierhub.supplier.common.SupplierAdapterContractTests#invalidEnvelopes")
 		void rejectsWholeMalformedOrMissingEnvelope(Supplier supplier, String value) {
 			body = value;
 			assertInvalidResponse(() -> search(supplier, "P1"));
@@ -321,8 +324,10 @@ class SupplierAdapterContractTests {
 		}
 
 		@ParameterizedTest
-		@MethodSource("com.supplierhub.supplier.common.SupplierAdapterContractTests#invalidCatalogOccupancy")
-		void rejectsWholeCatalogInsteadOfSavingATruncatedSnapshot(Supplier supplier, String occupancy) {
+		@MethodSource(
+				"com.supplierhub.supplier.common.SupplierAdapterContractTests#invalidCatalogOccupancy")
+		void rejectsWholeCatalogInsteadOfSavingATruncatedSnapshot(
+				Supplier supplier, String occupancy) {
 			String property =
 					supplier == Supplier.SUPPLIER_A
 							? "{\"hotelCode\":\"P1\",\"hotelName\":\"One\",\"roomTypes\":[{\"roomTypeCode\":\"R1\",\"roomTypeName\":\"Room\",\"maxOccupancy\":2}]}"
@@ -332,7 +337,10 @@ class SupplierAdapterContractTests {
 							supplier,
 							property
 									+ ","
-									+ replace(property.replace("P1", "P2"), "maxOccupancy", occupancy));
+									+ replace(
+											property.replace("P1", "P2"),
+											"maxOccupancy",
+											occupancy));
 			assertInvalidResponse(
 					() ->
 							catalogClients.stream()
@@ -505,4 +513,53 @@ class SupplierAdapterContractTests {
 		}
 	}
 
+	@Nested
+	class ResponseSizes {
+
+		@ParameterizedTest
+		@EnumSource(Supplier.class)
+		void actualBootCodecRejectsOversizedBodiesForBothOperations(Supplier supplier) {
+			body = "{\"padding\":\"" + "x".repeat(8 * 1024 * 1024) + "\",\"items\":[]}";
+			for (var operation :
+					List.<org.assertj.core.api.ThrowableAssert.ThrowingCallable>of(
+							() -> search(supplier, "P1"),
+							() ->
+									catalogClients.stream()
+											.filter(client -> client.supplier() == supplier)
+											.findFirst()
+											.orElseThrow()
+											.fetchCatalog()
+											.block(Duration.ofSeconds(5)))) {
+				assertThatThrownBy(operation)
+						.isInstanceOfSatisfying(
+								SupplierIntegrationException.class,
+								error ->
+										assertThat(error.getFailureType())
+												.isEqualTo(SupplierFailureType.RESPONSE_TOO_LARGE));
+			}
+		}
+
+		@Test
+		void actualBootCodecAcceptsLargeCatalogAndSearchFixtures() {
+			body = SupplierResponseFixtures.catalogBody(3000);
+			var snapshot =
+					catalogClients.stream()
+							.filter(client -> client.supplier() == Supplier.SUPPLIER_A)
+							.findFirst()
+							.orElseThrow()
+							.fetchCatalog()
+							.block(Duration.ofSeconds(5));
+			assertThat(snapshot.properties()).hasSize(3000);
+			body = SupplierResponseFixtures.searchBody(50, 5, 30);
+			var result =
+					searchClients.stream()
+							.filter(client -> client.supplier() == Supplier.SUPPLIER_A)
+							.findFirst()
+							.orElseThrow()
+							.search(SupplierResponseFixtures.request(50, 5, 30))
+							.block(Duration.ofSeconds(5));
+			assertThat(result.offers()).hasSize(250);
+			assertThat(result.rejectedOfferCount()).isZero();
+		}
+	}
 }
