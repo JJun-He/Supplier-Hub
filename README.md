@@ -68,10 +68,13 @@ curl -i --get 'http://localhost:8080/api/v1/stays/search' \
 | 상황 | HTTP | `status` | 결과 |
 | --- | --- | --- | --- |
 | 모든 Supplier 정상 | 200 | `COMPLETE` | 예약 가능한 Offer, 정상 빈 결과도 성공 |
+| 정상 반영된 카탈로그가 모두 비어 있음 | 200 | `COMPLETE` | 빈 `stays`, Supplier 검색 생략 |
 | 일부 Supplier 또는 배치 실패 | 200 | `PARTIAL` | 성공한 Offer와 `supplierResults`의 실패 유형 |
 | 모든 Supplier 조회 실패 | 503 | `FAILED` | 빈 `stays`와 Supplier별 실패 유형 |
 | 전체 카탈로그 미준비 또는 DB 읽기 실패 | 503 | `FAILED` | `CATALOG_UNAVAILABLE`, Supplier 검색 생략 |
 | 잘못된 날짜·인원 등 요청 오류 | 400 | 입력 오류 본문 | `code`와 `message` |
+
+카탈로그 최초 반영 여부는 매핑과 함께 DB에 저장합니다. 정상 빈 목록과 최초 동기화 실패를 구분하며, 재시작 후에도 준비 상태를 유지합니다. 기존 DB의 매핑은 V3 migration에서 준비 상태로 반영하고 내부 ID를 보존합니다.
 
 1~30박, 성인·아동 합계 1명 이상을 허용하며 `children`의 기본값은 0입니다. 요청·응답 필드와 전체 실패 정책은 [검색 API 계약](docs/architecture-decisions.md#search-api)을 참고하세요.
 
@@ -114,7 +117,7 @@ curl -X POST 'http://localhost:18080/control/b/mode?value=normal'
 ./gradlew check
 ```
 
-검증 구성은 **메인 270개 + Mock 6개 + E2E 9개**입니다. 실행 일자·성공 결과 재사용 여부·README 재현 결과와 미검증 범위는 [실행 검증 기록](docs/e2e-verification.md)에 정리합니다. 테스트의 PostgreSQL 컨테이너에도 Docker가 필요합니다.
+검증 구성은 **메인 302개 + Mock 6개 + E2E 12개**입니다. 실행 일자·성공 결과 재사용 여부·README 재현 결과와 미검증 범위는 [실행 검증 기록](docs/e2e-verification.md)에 정리합니다. 테스트의 PostgreSQL 컨테이너에도 Docker가 필요합니다.
 
 두 `bootRun`을 각각 Ctrl+C로 종료한 뒤 DB를 내립니다. 데이터 볼륨은 유지됩니다.
 

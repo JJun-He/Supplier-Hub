@@ -156,3 +156,20 @@ Supplier C 확장 실험은 기존 기록의 메인 파일 4개 변경·테스�
 사용하지 않는 Lombok의 컴파일·테스트 의존성 4개를 제거했다([`7e82b00`](https://github.com/JJun-He/Supplier-Hub/commit/7e82b00)). 제품 코드·테스트·실제 설정값은 변경하지 않았다.
 
 **검증:** Java 21과 Docker에서 `./gradlew check --rerun-tasks --offline --console=plain`을 실행했다. 메인 270개·Mock 6개·E2E 9개, 합계 285개를 모두 새로 실행해 실패·오류·건너뜀 0개를 확인했다. 14개 작업이 모두 실행됐으며 두 실행 JAR 빌드도 포함한다. 의존성과 컨테이너 이미지는 캐시를 사용했다. [후속 검증 기록](docs/e2e-verification.md#2026-09-17-미사용-의존성-제거-후-검증)에 범위를 남겼다.
+
+
+## 2026-09-17 — 카탈로그 상태·본문 timeout·실패 진단 보완
+
+리뷰에서 HTTP 200 헤더 이후 본문 수신이 멈추면 카탈로그가 읽기 timeout을 `UNKNOWN`으로 변환해 재시도를 건너뛰는 문제를 실제 HTTP로 재현했다. 공통 응답 오류 매퍼에서 중첩 timeout을 검사하도록 수정했으며 검색 무재시도 정책은 유지했다.
+
+정상 빈 카탈로그를 미준비와 구분하기 위해 `supplier_catalog_state`의 행 존재로 최초 정상 반영 여부를 저장한다. 매핑과 같은 트랜잭션에서 기록하고, V3는 기존 매핑 보유 Supplier만 backfill한다. 성공 시각은 추정하지 않는다. reader는 `REPEATABLE_READ`에서 매핑·준비 상태를 읽으며 각 조회 전 남은 예산을 적용한다. 설정 SELECT 2회·데이터 SELECT 2회로 늘어난 비용은 수용하되 성능 효과는 측정하지 않았다. 준비 상태는 최신성 지표와 구분한다.
+
+실패 진단에는 검색별 ID·배치 번호를 Reactor Context로 전달하고 외부 숙소·객실 코드와 원인을 안전한 길이로 기록한다. 상세는 배치당 5건, 전체 거부·생략 수는 요약 한 건으로 제한한다. 정상 결과·중복·거부 집계와 내부 오류 전파는 유지한다. 검색 서비스의 단순 위임 helper 두 개를 제거하고 현재 계약 문서를 갱신했다.
+
+대량 누락 보호의 자동 해제와 공개 Offer 중복 정책 변경은 이번 수정에서 보류했다. 별도 확인된 snapshot의 승인 경로는 추가 설계가 필요하며, DB 초기화로 내부 ID 보존을 깨지 않는다.
+
+**검증:** 초기 메인 테스트 실행 후, 모든 변경과 추가 회귀 테스트가 모인 상태에서 Java 21·Docker로 `./gradlew check --rerun-tasks --offline --console=plain`을 실행했다. 메인 302개·Mock 6개·E2E 12개, 합계 320개가 모두 실제 실행됐고 실패·오류·건너뜀 0개다. PostgreSQL migration·동시성·rollback과 별도 앱 재시작까지 검증했다. 이후 문서는 코드·로컬 링크·diff 공백을 대조했으며 상세 범위는 [실행 기록](docs/e2e-verification.md#2026-09-17-타임아웃준비-상태진단-보완-후-검증)에 남겼다.
+
+**마무리 판단:** 공개 응답에서 같아 보이는 Offer도 가격 근거가 다르면 보존하는 이유를 명시했다. 현재 반환 건수는 이미 일치하므로 중복 정책을 바꾸지 않으며, 관리자 기능에 해당하는 대량 삭제 승인도 추가하지 않았다. 로그 테스트는 실제 네트워크 대신 WebClient 응답 대역과 JSON 디코딩을 사용한다는 설명으로 정정했다.
+
+**커밋 분할:** 준비 상태([`ed07485`](https://github.com/JJun-He/Supplier-Hub/commit/ed07485)), 본문 timeout([`dd872fa`](https://github.com/JJun-He/Supplier-Hub/commit/dd872fa)), 진단 로그([`66facd0`](https://github.com/JJun-He/Supplier-Hub/commit/66facd0))와 문서를 나누었다. 각 코드 단계의 index 트리를 독립 소스로 추출해 준비 상태 전체 296개, timeout 관련 27개와 E2E 컴파일, 최종 전체 320개를 실제 실행해 통과했다. 최종 코드가 분할 전과 같은지도 확인했다. 범위와 결과는 [커밋 분할 검증](docs/e2e-verification.md#커밋-분할-검증)에 기록했다.

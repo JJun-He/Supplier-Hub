@@ -22,6 +22,8 @@ Java 21과 실행 중인 Docker가 필요하다. 저장소 루트에서 다음�
 
 로그와 HTTP 응답·경과 시간은 `build/reports/e2e/` 아래 실행별 디렉터리에 남는다. JUnit HTML 보고서는 `build/reports/tests/e2eTest/index.html`, 원본 결과는 `build/test-results/e2eTest/`에 생성된다. 정상 완료·기동 실패·테스트 실패 시 프로세스와 테스트 DB를 정리한다. 테스트 JVM의 종료 훅에도 자식 서버 정리를 등록한다. OS 강제 종료로 종료 훅 자체가 실행되지 않는 경우까지 보장하지는 않는다.
 
+`CatalogReadinessEndToEndTests`는 실제 PostgreSQL과 메인 실행 JAR에 별도의 로컬 HTTP fixture를 연결한다. 정상 빈 카탈로그·초기 동기화 실패를 만들고, 앱을 재시작한 뒤에도 DB 준비 상태가 유지되는지 확인한다. 테스트마다 DB schema를 분리하며 fixture가 받은 Supplier 검색 요청 수가 0인지 검증한다.
+
 ## 데이터 기대값
 
 정상 검색 기준은 2026-10-01부터 2026-10-04까지 3박, 성인 2명이다. 기대값은 Mock 데이터와 도메인 규칙에서 독립적으로 계산한다.
@@ -52,6 +54,9 @@ Java 21과 실행 중인 Docker가 필요하다. 저장소 루트에서 다음�
 | 성인·아동 합산 수용 인원 초과 | HTTP 200 / COMPLETE, 빈 stays, unavailable 건수 반영 |
 | 잘못된 날짜·음수 인원·날짜 형식·필수값 누락 | HTTP 400, 입력 오류 코드, Supplier 논리 호출 증가 없음 |
 | DB 숙소 테이블 잠금 | HTTP 503 / FAILED, CATALOG_UNAVAILABLE, 읽기 TIMEOUT 지표 +1, Supplier 논리 호출 증가 없음, 잠금 해제 후 COMPLETE |
+| 새 DB·동기화 비활성 | HTTP 503 / FAILED, 양쪽 CATALOG_UNAVAILABLE, Supplier 검색 없음 |
+| A/B 정상 빈 카탈로그·앱 재시작 | HTTP 200 / COMPLETE, 빈 stays. 동기화를 끈 재시작 후에도 같은 응답, Supplier 검색 없음 |
+| A 정상 빈 카탈로그·B 최초 동기화 실패 | HTTP 200 / PARTIAL, A SUCCESS·B CATALOG_UNAVAILABLE, Supplier 검색 없음 |
 
 실제 검색이 진행된 요청마다 `supplier.calls`의 SEARCH COUNT가 A/B 각각 1 증가할 때까지 확인한다. 다음 요청의 기준값과 이전 완료 기록이 겹치지 않게 하기 위한 처리다. 이 값은 계측 경계의 **논리 호출 수**이며, Mock의 HTTP 수신 횟수나 전송 계층 내부 재시도를 직접 측정한 값이 아니다.
 
@@ -75,7 +80,7 @@ Java 21에서 두 실행 JAR 빌드와 메인 270개 회귀 테스트가 성공�
 
 - Mock의 A 오류는 HTTP 503이고 B 오류는 HTTP 200 안의 E503 본문이다. 고객 응답과 업무 실패 분류를 함께 확인한다.
 - Mock의 `no-response`는 30초 응답 지연이다. 기본 response 2초 / call 3초 / overall 5초 설정에서는 응답 시간 제한이 먼저 작동할 수 있다. 이 사례를 전체 HTTP 완료 5초 상한의 증명으로 해석하지 않는다.
-- Mock 제어 모드는 검색에만 적용된다. 카탈로그 장애 시나리오와 인증 키의 유효성 검증은 이번 연결 검증의 범위가 아니다.
+- Mock 제어 모드는 검색에만 적용된다. 카탈로그 초기 실패·정상 빈 상태는 별도의 `CatalogReadinessEndToEndTests`가 검증한다. 인증 키의 유효성은 검증하지 않는다.
 - 50개 분할·전역 동시성·codec 크기·입력 항목 격리 등의 상세 경계는 기존 단위·통합 테스트와 함께 확인한다. 작은 정상 Mock 데이터로 수천 개 숙소의 처리 용량을 검증한 것으로 표현하지 않는다.
 - README의 고정 포트 `bootRun`·Compose 실행 재현은 아래 별도 기록으로 확인한다. 자동 E2E는 자동 배정 포트와 Testcontainers를 사용한다.
 
@@ -125,3 +130,30 @@ Lombok 컴파일·테스트 의존성 4개를 제거한 뒤 같은 Java 21·Dock
 메인 270개·Mock 6개·E2E 9개를 모두 재실행했고 JUnit XML 합계 285개, 실패·오류·건너뜀 0개를 확인했다. 두 실행 JAR 빌드를 포함해 14개 작업이 모두 실행됐으며 `BUILD SUCCESSFUL`이었다. 이번에는 작업 저장소에서 실행했으며 의존성과 컨테이너 이미지는 로컬 캐시를 사용했다. 명령 로그·집계는 추적하지 않는 `build/reports/review-followup/`에 남겼다.
 
 같이 보완한 타임아웃 근거는 설정값 변경이 아니며, 서킷 브레이커는 미구현 제안 설계다. 이 테스트 성공이 서킷 동작을 검증했다는 뜻은 아니다. Compose·고정 포트 `bootRun` 수동 재현은 앞 절의 결과이며 이번에 반복하지 않았다.
+
+
+## 2026-09-17 타임아웃·준비 상태·진단 보완 후 검증
+
+Java 21과 Docker에서 작업 저장소의 변경 코드에 대해 `./gradlew check --rerun-tasks --offline --console=plain`을 실행했다. 메인 **302개**, Mock **6개**, E2E **12개**, 합계 **320개**를 모두 새로 실행해 실패·오류·건너뜀 0개를 확인했다. 두 실행 JAR을 포함한 14개 작업이 모두 실행됐다. 의존성과 컨테이너 이미지는 로컬 캐시를 사용했다.
+
+추가 검증은 다음 경계를 다룬다.
+
+- A/B 응답 헤더·부분 본문 이후 읽기 timeout의 분류, 최대 2회 재시도(총 3회 호출), 재시도 중·다음 동기화의 회복, 지표·허용량 반환과 검색 무재시도.
+- V2 DB의 준비 상태 backfill과 기존 ID 보존, 정상 빈 snapshot commit, 준비 상태·매핑의 동시 rollback, 최초 commit과 겹친 검색의 일관된 DB snapshot.
+- 준비 상태 조회 전 남은 SQL 예산 재적용, 준비 상태 테이블 잠금 timeout·회복·설정 복원.
+- 정상 빈 목록의 고객 HTTP 응답, 최초 미준비·일부 미준비, 재동기화 없는 앱 재시작 후 영속 상태 유지.
+- A/B JSON decoder·정규화를 통한 오류 문맥, 배치당 상세 5개와 요약 건수, 외부 키·원인 길이 제한, 개행 제거, 항목별 stack trace 부재와 구독별 Context.
+
+이후 문서만 정리하고 코드 대조·로컬 링크·`git diff --check`를 확인했다. Compose·고정 포트 `bootRun` 절차는 변경하지 않았으며 이번에 다시 실행하지 않았다. 새 DB 읽기의 추가 SQL 왕복, 로깅 정책 변경의 운영 지연·처리량 효과는 측정하지 않았다. 대량 누락 snapshot 강제 승인과 공개 Offer 중복 정책은 구현하지 않았다.
+
+### 커밋 분할 검증
+
+같은 날 준비 상태·본문 timeout·진단 로그를 별도 커밋으로 나누면서 각 단계의 Git index 트리만 새 임시 디렉터리에 추출했다. 로컬 `.env`나 기존 빌드 결과는 복사하지 않았다. Java 21·Docker와 로컬 의존성 캐시를 사용했으며 아래 모든 실행에 `--rerun-tasks --offline --console=plain`을 적용했다.
+
+| 단계 | 실행 범위 | 실제 실행 결과 |
+| --- | --- | --- |
+| 준비 상태 수정 | `check` | 메인 278개 + Mock 6개 + E2E 12개 = 296개 통과, 14개 작업 모두 실행 |
+| 본문 timeout 수정 | `:test --tests com.supplierhub.supplier.common.SupplierFailureMapperTests --tests com.supplierhub.supplier.common.SupplierCatalogBodyTimeoutTests compileE2eTestJava` | 관련 테스트 27개 통과, 메인·테스트·E2E 컴파일 포함 5개 작업 모두 실행 |
+| 진단 로그까지 반영한 최종 코드 | `check` | 메인 302개 + Mock 6개 + E2E 12개 = 320개 통과, 14개 작업 모두 실행 |
+
+각 실행의 실패·오류·건너뜀은 0개다. 최종 코드·테스트 24개 변경 파일이 분할 전 검증한 파일과 바이트 단위로 같음도 확인했다. 마지막 문서 커밋은 코드 변경이 없어 전체 테스트를 반복하지 않고 코드 대조·로컬 링크·`git diff --check`를 확인했다. 실행 로그·JUnit XML·건수 집계는 추적하지 않는 `build/reports/commit-verification/`에 보존했다.

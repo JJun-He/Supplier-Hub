@@ -2,7 +2,7 @@
 
 2026-09-17에 연동 요구사항 전체를 현재 코드, 테스트, README와 대조했다. 이 문서는 이 프로젝트의 구현 선택과 검증 근거를 요약하며 외부 기준 문서 원문은 저장소에 포함하지 않는다.
 
-이 문서는 코드·문서 대조 결과다. 같은 날 별도 디렉터리에서 자동 테스트 285개와 Compose·bootRun·검색 절차를 재현했으며, 이후 미사용 의존성 제거 뒤에도 전체 테스트를 재실행했다. 실행별 조건·결과는 [전체 연결 검증](e2e-verification.md)에서 확인한다. 아래의 **구현 확인**은 해당 코드와 테스트 근거가 있다는 뜻이며, 모든 운영 환경의 동작이나 외부 제출 완료를 뜻하지 않는다.
+이 문서는 코드·문서 대조 결과다. 초기 대조 때는 같은 날 별도 디렉터리에서 자동 테스트 285개와 Compose·bootRun·검색 절차를 재현했고, 미사용 의존성 제거 뒤에도 전체 테스트를 재실행했다. 이후 카탈로그 준비 상태·본문 timeout·진단 로그 보완 뒤 Java 21·Docker 환경에서 `./gradlew check --rerun-tasks --offline --console=plain`을 다시 실행했다. 메인 302개·Mock 6개·E2E 12개, 총 320개가 실패·오류·건너뜀 없이 통과했으며 기존 실행 결과를 재사용하지 않았다. 실행별 조건·결과는 [전체 연결 검증](e2e-verification.md)에서 확인한다. 아래의 **구현 확인**은 해당 코드와 테스트 근거가 있다는 뜻이며, 모든 운영 환경의 동작이나 외부 제출 완료를 뜻하지 않는다.
 
 ## 1. 필수 구현
 
@@ -13,12 +13,13 @@
 | 숙소·객실 타입·가격·재고의 표준 모델 | [숙소][property], [객실 타입][room-type], [Offer][offer], [가격][price], [연박 재고][inventory], [README][readme] | [가격 테스트][price-test], [재고 테스트][inventory-test], [정규화 테스트][normalizer-test] | **구현 확인.** 숙소와 객실 타입은 영속 매핑, 가격·재고는 검색 시점의 Offer다. 검색 응답은 세금 포함 총액을 기준으로 하며 일별 가격은 반환하지 않는다. 선택과 손실을 README에서 설명한다. |
 | 외부 코드의 유일성 범위와 내부 ID 유지 | [매핑 스키마][schema], [카탈로그 저장][writer] | [키 중복·범위 테스트][repository-test], [실제 commit 경계 테스트][commit-test] | **구현 확인.** 숙소는 Supplier와 외부 코드, 객실 타입은 내부 숙소와 외부 코드로 유일성을 보장한다. 삭제 대신 비활성화하여 누락·재등장에도 ID를 유지한다. Supplier 간 동일 숙소 추정은 하지 않는다. |
 | 목록 수집·저장 후 실시간 검색 | [A 목록 어댑터][a-catalog], [B 목록 어댑터][b-catalog], [동기화 서비스][sync], [스케줄러][scheduler] | [목록 계약 테스트][catalog-client-test], [동기화 테스트][sync-test], [스케줄러 테스트][scheduler-test], [E2E][e2e-test] | **구현 확인.** 기동 직후와 이전 실행 완료 후 10분마다 목록을 갱신한다. 검색 중 목록 API를 다시 호출하지 않는다. 동기화 실패 시 기존 매핑을 유지하며 갱신은 단일 인스턴스만 지원한다. |
+| 정상 빈 카탈로그와 최초 미준비 구분 | [준비 상태 스키마·기존 매핑 backfill][catalog-state-schema], [카탈로그 저장][writer], [활성 매핑·준비 상태 조회][mapping-reader], [통합 검색][search] | [준비 상태 원자성·V3 migration 테스트][commit-test], [검색 테스트][search-test], [준비 상태 E2E][readiness-e2e-test] | **구현 확인.** 정상 snapshot의 최초 반영 여부를 매핑과 같은 트랜잭션에서 저장하고 재시작 후에도 유지한다. 준비된 빈 목록은 호출 없이 `SUCCESS`, 최초 미준비는 `CATALOG_UNAVAILABLE`이다. 준비 상태는 최신 성공 시각이 아니며 기존 대량 누락 보호를 해제하지 않는다. |
 | Supplier 형식 격리와 확장 경로 | [카탈로그 포트][catalog-port], [검색 포트][search-port], [A 검색 어댑터][a-search], [B 검색 어댑터][b-search], [아키텍처 결정][architecture] | [어댑터 계약 테스트][adapter-test], [통합 검색 테스트][search-test] | **구현 확인.** Supplier별 JSON과 오류 규약은 어댑터 안에서 처리한다. 새 Supplier에는 enum·설정·WebClient·목록/검색 구현과 테스트 추가가 필요하며, 공통 모델로 표현 가능하면 검색 집계 로직은 유지한다. |
 | 보유 숙소 조회·Supplier별 묶음·50개 분할·병렬 호출 | [통합 검색 서비스][search], [검색 요청 계약][search-request], [활성 매핑 조회][mapping-reader], [아키텍처 결정][architecture] | [51개 분할·동시 실행·동시성 제한 테스트][search-test], [검색 요청 테스트][request-test] | **구현 확인.** 활성 Supplier의 활성 숙소·객실 매핑을 읽어 최대 50개씩 요청한다. 요청당 Supplier별 동시 호출은 기본 4개다. 수천 개 숙소에서는 전체 시간 예산 안에 끝난 묶음만 반환할 수 있으며 처리 용량은 측정하지 않았다. |
 | 고객 검색 URL·입력·최소 응답 정보 | [검색 컨트롤러][controller], [응답 모델][response], [검색 조건][criteria] | [고객 HTTP 계약 테스트][controller-test], [E2E][e2e-test] | **구현 확인.** 날짜·성인·아동 조건을 받아 내부 숙소/객실 ID와 이름, 수용 인원, 예약 가능 수, 공급사, 가격, 부분 실패를 반환한다. `children` 기본값은 0이고 최대 30박이며, 원본 Supplier 코드는 응답에서 제외한다. |
 | 숙박일 경계·인원·연박 가용 수량·품절 처리 | [검색 조건][criteria], [날짜 범위 검사][date-coverage], [연박 재고][inventory], [Offer][offer], [README][readme] | [조건 테스트][criteria-test], [재고 테스트][inventory-test], [인원·품절 E2E][e2e-test] | **구현 확인.** 체크아웃 전날까지의 재고가 모두 있어야 하며 전체 최솟값을 사용한다. 품절 또는 성인+아동을 수용할 수 없는 Offer는 제외한다. 여러 객실을 합쳐 인원을 수용하는 계산은 하지 않는다. |
 | 공통 요청 형식·A/B 요금 의미 | [WebClient 구성][client-config], [A 검색 어댑터][a-search], [B 검색 어댑터][b-search], [금액][money], [가격][price] | [A/B 요청·가격 테스트][search-client-test], [가격 테스트][price-test], [엄격 입력 계약 테스트][adapter-test] | **구현 확인.** API 키 헤더·ISO 날짜·분리된 인원·숙소 코드 목록을 전송한다. A는 일별 세전액과 세금을 합산하고 B는 세금 포함 총액을 보존한다. 누락된 B의 일별 가격·세금액은 역산하지 않는다. |
-| HTTP 실패와 본문 실패의 공통 분류 | [HTTP 오류 분류][http-failure], [B 본문 오류 분류][b-failure], [A 검색 어댑터][a-search], [B 검색 어댑터][b-search] | [HTTP 오류 분류 테스트][failure-test], [A/B 계약 테스트][adapter-test], [양쪽 장애 E2E][e2e-test] | **구현 확인.** B는 HTTP 성공이어도 본문 결과를 확인한다. 요청·인증·호출 제한·가용성 등 공통 실패 유형으로 변환하고 실패 상세를 고객 응답에 남긴다. |
+| HTTP 실패와 본문 실패의 공통 분류 | [HTTP 오류 분류][http-failure], [B 본문 오류 분류][b-failure], [전송 오류 분류][transport-failure], [A 검색 어댑터][a-search], [B 검색 어댑터][b-search] | [HTTP 오류 분류 테스트][failure-test], [본문 수신 timeout 테스트][body-timeout-test], [A/B 계약 테스트][adapter-test], [양쪽 장애 E2E][e2e-test] | **구현 확인.** B는 HTTP 성공이어도 본문 결과를 확인한다. HTTP 200 헤더 이후 본문 수신 중 timeout도 중첩 원인으로 분류한다. 요청·인증·호출 제한·가용성 등 공통 실패 유형으로 변환하고 실패 상세를 고객 응답에 남긴다. |
 | 연결·응답 제한과 부분 실패 | [WebClient 구성][client-config], [통합 검색 서비스][search], [설정][config], [아키텍처 결정][architecture] | [무응답 테스트][search-client-test], [부분 결과·전체 시간 예산 테스트][search-test], [취소·회복 테스트][resource-test], [장애·복구 E2E][e2e-test] | **구현 확인.** 검색 초기값은 연결 500ms, 응답 2초, 호출 3초, 전체 검색 예산 5초다. 실패한 Supplier/묶음과 별개로 완료된 결과를 유지한다. 각 값의 선택 이유와 예산 관계는 [시간 예산 설계](architecture-decisions.md#call-resources)에 보완했다. 값은 초기 정책이며 응답 직렬화까지 포함한 엄격한 HTTP 완료 상한이 아니다. |
 | 별도 Mock과 정상·오류·무응답 재현 | [Mock 컨트롤러][mock-controller], [Mock 데이터 생성][mock-responses], [Mock 포트 설정][mock-config], [README][readme] | [Mock 테스트][mock-test], [별도 프로세스 E2E][e2e-test] | **구현 확인.** 메인 기본 8080과 Mock 18080을 분리한다. A HTTP 오류, B 본문 오류, 30초 지연으로 기본 검색 제한을 넘는 무응답 상황을 재현한다. Mock은 완전한 외부 서비스 구현이 아니며 키 검증·인원/50개 상한 검사는 하지 않는다. 해당 요청 경계는 메인 코드·계약 테스트에서 확인한다. |
 | 실행 안내·설계 근거·실제 흐름의 일치 | [README][readme], [아키텍처 결정][architecture], [전체 연결 검증][e2e-doc] | [E2E][e2e-test], [빌드의 check 연결][build] | **문서·코드 대조 확인.** 목록의 DB commit부터 실제 고객 HTTP까지 연결한 자동 테스트가 있다. 고정 포트 수동 재현의 완료 여부와 최신 실행 결과는 전체 연결 검증 문서에서 관리한다. |
@@ -29,10 +30,11 @@
 
 | 항목 | 구현·설계 근거 | 테스트·기록 근거 | 현재 상태와 한계 |
 | --- | --- | --- | --- |
-| 재시도 | [동기화 서비스][sync], [WebClient 구성][client-config], [아키텍처 결정][architecture] | [동기화 재시도 테스트][sync-test], [검색 미재시도 테스트][search-client-test] | **일부 구현.** 카탈로그의 일시적 실패만 기본 최대 2회, 300ms 기반 backoff로 재시도한다. 검색 추가 재시도와 전송 계층 자동 재시도는 끈다. 호출 제한·인증·잘못된 응답은 즉시 반복하지 않는다. |
+| 재시도 | [동기화 서비스][sync], [WebClient 구성][client-config], [아키텍처 결정][architecture] | [동기화 재시도 테스트][sync-test], [본문 수신 timeout·재시도·회복 테스트][body-timeout-test], [검색 미재시도 테스트][search-client-test] | **일부 구현.** 카탈로그의 일시적 실패만 기본 최대 2회, 300ms 기반 backoff로 재시도한다. 검색 추가 재시도와 전송 계층 자동 재시도는 끈다. 호출 제한·인증·잘못된 응답은 즉시 반복하지 않는다. |
 | 서킷 브레이커·회복탄력성 라이브러리 | [서킷 브레이커 제안 설계](architecture-decisions.md#circuit-breaker-design), [README][readme] | 코드·의존성 대조: [Gradle][build] | **제안 설계, 미구현.** 현재는 유한한 호출 자원·시간 예산·부분 응답을 사용한다. 차단·탐색·복구의 제안 정책을 문서화했으며, 실제 상태 머신과 Resilience4j 등 서킷 브레이커 라이브러리는 구현·도입하지 않았다. |
 | 재고·요금 캐시 | [아키텍처 결정][architecture] | 코드 대조: [통합 검색 서비스][search] | **보류.** 매 검색마다 실시간 조회한다. TTL·동시 갱신 억제·허용 오차를 포함한 캐시 전략을 구현하거나 검증한 상태는 아니다. |
-| 정규화 실패 격리·검색 이력·원본 보관 | [정규화기][normalizer], [업무 지표][metrics], [아키텍처 결정][architecture] | [정규화 테스트][normalizer-test], [항목별 오류 계약 테스트][adapter-test] | **일부 구현.** 잘못된 항목은 정상 형제 항목과 격리하고 사유 로그·건수를 남긴다. 원문 격리 저장소, 검색 이력 저장, 재처리 경로는 없다. 따라서 원문을 보존하는 실패 데이터 격리까지 완료한 것은 아니다. |
+| 정규화 실패 격리·검색 이력·원본 보관 | [정규화기][normalizer], [검색·배치 문맥][search-context], [업무 지표][metrics], [아키텍처 결정][architecture] | [정규화·로그 테스트][normalizer-test], [WebClient 디코딩·진단 로그 테스트][offer-logging-test], [항목별 오류 계약 테스트][adapter-test] | **일부 구현.** 잘못된 항목은 정상 형제 항목과 격리한다. `searchId`·배치·외부 키·원인을 포함한 상세 로그는 배치당 최대 5개이며 거부·샘플·생략 건수를 집계한다. 외부 문자열은 길이·제어 문자를 제한한다. 원문 격리 저장소, 검색 이력 저장, 재처리 경로는 없다. |
+| 대량 누락 snapshot의 복구 | [카탈로그 안전 검사][writer], [카탈로그 정책](architecture-decisions.md#catalog-sync) | [기존 누락·거부 테스트][writer-test] | **보호 구현, 승인 경로 보류.** 정상적인 대량 제거도 전체 거부될 수 있다. 공급사 확인 후 특정 snapshot을 승인하는 복구 기능은 아직 없으며 반복 수신만으로 자동 수락하지 않는다. |
 | Supplier 간 동일 숙소 병합·판매 조건 차이 | [매핑 스키마][schema], [정규화기][normalizer], [응답 모델][response], [README][readme] | [정확히 같은 Offer만 중복 제거하는 테스트][adapter-test], [공급사별 조건 E2E][e2e-test] | **판단 완료, 교차 Supplier 병합 미구현.** 공급사별 내부 ID와 조식·가격 조건을 각각 보존한다. 같은 Supplier의 완전히 같은 Offer 제거는 서로 다른 공급사의 동일 숙소 판별과 다르다. |
 | 통화 | [금액][money], [응답 모델][response], [아키텍처 결정][architecture] | [가격·통화 테스트][price-test], [숫자 타입·범위 계약 테스트][adapter-test] | **원본 보존 구현.** ISO 통화 코드와 최소 단위 정수를 유지한다. 환산·환율 시점·비교 통화 선택은 구현하지 않았다. |
 | 예약 생성·취소·보상과 전체 도메인 경계 | [아키텍처 결정][architecture], [README][readme] | 구현 범위 대조 | **보류.** 현재는 검색 흐름까지다. 예약 API와 멱등성·보상 처리의 상세 실행 설계 또는 테스트는 없다. |
@@ -55,9 +57,9 @@
 
 ## 4. 저장소와 검증 결과의 경계
 
-현재 설계·개발 기록은 주제별로 정리하고 완료된 계획·감사는 `docs/archive`로 옮겼다. 감사 JSON 4개는 이동 전후 바이트가 동일하다. Markdown의 로컬 파일·앵커와 기록에 연결한 커밋을 확인했다. 앞선 문서 정리(`f3d7e91`)에는 제품 코드·테스트·빌드 변경이 없었다. 후속 개선에서는 제품 코드·테스트·설정값을 유지하고 미사용 Lombok 의존성 4개를 제거한 뒤 전체 테스트를 재실행했다. 비밀 형식·문구 검사는 정해진 패턴과 로컬 파일 대조 범위이며, 원격 저장소의 설정·도달 불가능한 객체까지 검사한 것으로 표현하지 않는다.
+현재 설계·개발 기록은 주제별로 정리하고 완료된 계획·감사는 `docs/archive`로 옮겼다. 감사 JSON 4개는 이동 전후 바이트가 동일하다. Markdown의 로컬 파일·앵커와 기록에 연결한 커밋을 확인했다. 앞선 문서 정리(`f3d7e91`)에는 제품 코드·테스트·빌드 변경이 없었다. 이어진 Lombok 정리 단계에서는 제품 코드·테스트·설정값을 유지하고 미사용 의존성 4개를 제거한 뒤 전체 테스트를 재실행했다. 이후 본문 timeout 분류·카탈로그 준비 상태·진단 로그 보완은 별도 코드·테스트 변경이며 위 실행 기록만으로 그 성공을 주장하지 않는다. 비밀 형식·문구 검사는 정해진 패턴과 로컬 파일 대조 범위이며, 원격 저장소의 설정·도달 불가능한 객체까지 검사한 것으로 표현하지 않는다.
 
-이 대조에서 필수 기능의 새로운 구현 결함은 발견하지 않았다. 자동 검증의 건수·실행일·기존 결과 재사용 여부는 [전체 연결 검증][e2e-doc]과 [JOURNAL][journal]에 기록한다. 테스트 소스 링크가 있다는 사실과 해당 검증을 이번에 다시 실행했다는 주장을 구분한다.
+초기 대조에서는 새로운 구현 결함을 발견하지 못했지만 후속 검토에서 카탈로그 본문 수신 timeout 분류와 정상 빈 상태 구분 문제를 확인해 보완했다. 자동 검증의 건수·실행일·기존 결과 재사용 여부는 [전체 연결 검증][e2e-doc]과 [JOURNAL][journal]에 기록한다. 테스트 소스 링크가 있다는 사실과 해당 검증을 이번에 다시 실행했다는 주장을 구분한다.
 
 현재 근거가 보장하지 않는 범위는 다음과 같다.
 
@@ -79,6 +81,7 @@
 [property]: ../src/main/java/com/supplierhub/catalog/domain/Property.java
 [room-type]: ../src/main/java/com/supplierhub/catalog/domain/RoomType.java
 [schema]: ../src/main/resources/db/migration/V1__create_catalog_mappings.sql
+[catalog-state-schema]: ../src/main/resources/db/migration/V3__record_catalog_initialization.sql
 [writer]: ../src/main/java/com/supplierhub/catalog/application/CatalogSnapshotWriter.java
 [sync]: ../src/main/java/com/supplierhub/catalog/application/CatalogSynchronizationService.java
 [scheduler]: ../src/main/java/com/supplierhub/catalog/application/CatalogSynchronizationScheduler.java
@@ -90,6 +93,8 @@
 [a-search]: ../src/main/java/com/supplierhub/supplier/suppliera/SupplierASearchClient.java
 [b-search]: ../src/main/java/com/supplierhub/supplier/supplierb/SupplierBSearchClient.java
 [http-failure]: ../src/main/java/com/supplierhub/supplier/common/SupplierHttpFailureMapper.java
+[transport-failure]: ../src/main/java/com/supplierhub/supplier/common/SupplierTransportFailureMapper.java
+[search-context]: ../src/main/java/com/supplierhub/supplier/common/SearchCallContext.java
 [b-failure]: ../src/main/java/com/supplierhub/supplier/supplierb/SupplierBFailureMapper.java
 [metrics]: ../src/main/java/com/supplierhub/supplier/common/SupplierMetrics.java
 [search]: ../src/main/java/com/supplierhub/search/application/IntegratedSearchService.java
@@ -111,9 +116,11 @@
 [boot-test]: ../src/test/java/com/supplierhub/SupplierHubApplicationTests.java
 [repository-test]: ../src/test/java/com/supplierhub/catalog/infrastructure/CatalogRepositoryTests.java
 [commit-test]: ../src/test/java/com/supplierhub/catalog/infrastructure/CatalogCommitBoundaryTests.java
+[writer-test]: ../src/test/java/com/supplierhub/catalog/application/CatalogSnapshotWriterTests.java
 [sync-test]: ../src/test/java/com/supplierhub/catalog/application/CatalogSynchronizationServiceTests.java
 [scheduler-test]: ../src/test/java/com/supplierhub/catalog/application/CatalogSynchronizationSchedulerTests.java
 [catalog-client-test]: ../src/test/java/com/supplierhub/supplier/common/SupplierCatalogClientTests.java
+[body-timeout-test]: ../src/test/java/com/supplierhub/supplier/common/SupplierCatalogBodyTimeoutTests.java
 [search-client-test]: ../src/test/java/com/supplierhub/supplier/common/SupplierSearchClientTests.java
 [adapter-test]: ../src/test/java/com/supplierhub/supplier/common/SupplierAdapterContractTests.java
 [failure-test]: ../src/test/java/com/supplierhub/supplier/common/SupplierFailureMapperTests.java
@@ -121,9 +128,11 @@
 [request-test]: ../src/test/java/com/supplierhub/supplier/common/SupplierSearchRequestTests.java
 [search-test]: ../src/test/java/com/supplierhub/search/application/IntegratedSearchServiceTests.java
 [normalizer-test]: ../src/test/java/com/supplierhub/search/application/OfferNormalizerTests.java
+[offer-logging-test]: ../src/test/java/com/supplierhub/supplier/common/SupplierOfferLoggingTests.java
 [price-test]: ../src/test/java/com/supplierhub/search/domain/PriceTests.java
 [inventory-test]: ../src/test/java/com/supplierhub/search/domain/StayInventoryTests.java
 [criteria-test]: ../src/test/java/com/supplierhub/search/domain/SearchCriteriaTests.java
 [controller-test]: ../src/test/java/com/supplierhub/search/api/StaySearchControllerTests.java
 [mock-test]: ../mock-supplier/src/test/java/com/supplierhub/mock/MockSupplierControllerTests.java
 [e2e-test]: ../src/e2eTest/java/com/supplierhub/e2e/SupplierHubEndToEndTests.java
+[readiness-e2e-test]: ../src/e2eTest/java/com/supplierhub/e2e/CatalogReadinessEndToEndTests.java

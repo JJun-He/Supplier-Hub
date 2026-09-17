@@ -8,7 +8,7 @@ Supplier의 숙소·객실 카탈로그를 내부 ID에 매핑하고, 고객의 
 
 ```text
 주기 동기화: Supplier 카탈로그 → 전체 snapshot 검증 → PostgreSQL 매핑 저장
-고객 검색: 입력 검증 → 활성 매핑 조회 → Supplier별 50개 분할·병렬 조회
+고객 검색: 입력 검증 → 활성 매핑·카탈로그 준비 상태 조회 → Supplier별 50개 분할·병렬 조회
           → Offer 정규화·실패 격리 → 내부 이름 결합 → stays[].roomTypes[].offers[]
 ```
 
@@ -178,7 +178,9 @@ GET /api/v1/stays/search?checkIn=2026-10-01&checkOut=2026-10-04&adults=2&childre
 | 모든 활성 Supplier가 `FAILED` | `FAILED` | 503 |
 | 그 밖의 조합 또는 Supplier 자체의 `PARTIAL` | `PARTIAL` | 200 |
 
-Supplier는 정상 완료 배치가 없으면 `FAILED`, 완료 배치가 있고 실패 배치·거부 항목이 없으면 `SUCCESS`, 완료 배치와 실패 사유가 함께 있으면 `PARTIAL`이다. 정상 빈 검색 결과도 완료 배치다. A가 정상 빈 결과이고 B가 timeout이면 `200 PARTIAL, stays=[]`다. 모든 항목이 거부된 정상 응답도 거부 건수 때문에 `PARTIAL`일 수 있으므로 `PARTIAL`은 Offer가 반드시 있다는 뜻이 아니다. 정상 DB 조회에서 활성 Supplier가 모두 설정으로 제외되면 `COMPLETE`와 빈 결과를 반환한다.
+호출할 배치가 있는 Supplier는 정상 완료 배치가 없으면 `FAILED`, 완료 배치가 있고 실패 배치·거부 항목이 없으면 `SUCCESS`, 완료 배치와 실패 사유가 함께 있으면 `PARTIAL`이다. 정상 빈 검색 결과도 완료 배치다. 카탈로그가 정상 반영됐지만 활성 객실 매핑이 없는 Supplier는 HTTP 호출 없이 `SUCCESS`이며, 최초 반영 전에는 `CATALOG_UNAVAILABLE`로 실패한다. 준비 상태의 저장 기준은 [카탈로그 동기화](#catalog-sync)를 따른다.
+
+A가 정상 빈 결과이고 B가 timeout 또는 카탈로그 미준비이면 `200 PARTIAL, stays=[]`다. 양쪽 카탈로그가 정상적으로 비어 있으면 `200 COMPLETE, stays=[]`다. 모든 항목이 거부된 정상 응답도 거부 건수 때문에 `PARTIAL`일 수 있으므로 `PARTIAL`은 Offer가 반드시 있다는 뜻이 아니다. 정상 DB 조회에서 활성 Supplier가 모두 설정으로 제외되면 `COMPLETE`와 빈 결과를 반환한다.
 
 `206 Partial Content`는 사용하지 않는다. 상세 원인은 공통 실패 유형으로 제공하고 원본 응답·외부 코드·내부 예외 메시지·stack trace는 노출하지 않는다.
 
@@ -212,9 +214,11 @@ A는 각 날짜의 세전 가격과 세금을 더한 뒤 숙박일 전체를 합
 
 검색 응답을 독립된 항목 목록으로 읽을 수 있으면 잘못된 항목만 `rejectedOfferCount`에 넣고 형제 Offer를 보존한다. 어댑터의 원본 항목 변환부터 값 객체 생성까지 후보별 경계 안에서 수행한다. JSON 타입·외부 값 오류는 `InvalidValueException`과 `OfferMappingException`으로 명시하고, 예상하지 못한 NPE·상태 오류·일반 예외는 항목 오류로 삼지 않는다. 오류 범위와 retry는 [실패 정책](#failure-policy)을 따른다.
 
-정규화된 `Offer`의 모든 값이 같으면 `LinkedHashSet`으로 한 건만 유지한다. A의 일별 가격은 먼저 날짜순으로 정렬하므로 배열 순서만 다른 중복도 제거된다. 중복은 `duplicateOfferCount`와 지표로만 기록하고 고객 응답의 거부 건수·`PARTIAL`을 늘리지 않는다. `acceptedOfferCount`는 중복·충돌 처리를 마친 실제 반환 Offer 수다.
+정규화된 `Offer`의 모든 값이 같으면 한 건만 유지한다. `LinkedHashMap`의 키로 Offer와 입력 순서를 보존하고 값으로 최초 항목 순번을 저장해 충돌 거부 로그에 사용한다. A의 일별 가격은 먼저 날짜순으로 정렬하므로 배열 순서만 다른 중복도 제거된다. 중복은 `duplicateOfferCount`와 지표로만 기록하고 고객 응답의 거부 건수·`PARTIAL`을 늘리지 않는다. `acceptedOfferCount`는 중복·충돌 처리를 마친 실제 반환 Offer 수다.
 
 가격·재고·조식·통화·일별 가격 구성이 다르면 각각 보존한다. 요금제 식별자가 없으므로 같은 객실이라는 이유로 최저가 하나를 고르거나 같은 상품의 충돌로 단정하지 않는다. 다만 최대 수용 인원은 응답의 객실 타입 속성이므로 반환 가능한 Offer끼리 같은 내부 객실 ID의 수용 인원이 다르면 그 객실의 Offer를 모두 거부한다. 중복 제거 후 제외한 건수를 거부 수에 더하고 다른 객실은 유지한다.
+
+같은 숙소·객실에서 공급사·재고·조식·통화·총액이 같고 일별 가격 근거만 다른 Offer는 고객 응답에서 동일하게 보일 수 있다. 상품의 동일성과 대표 가격 근거를 결정할 계약이 없어 현재는 각각 보존한다.
 
 한 숙소의 객실은 현재 하나의 배치에 속하므로 동일 객실의 충돌 검사가 한곳에서 끝난다. 같은 숙소를 여러 배치로 나누거나 재시도 결과를 병합하는 기능을 추가하면 최종 집계 경계의 중복·충돌 정책을 다시 설계해야 한다.
 
@@ -248,23 +252,23 @@ A는 각 날짜의 세전 가격과 세금을 더한 뒤 숙박일 전체를 합
 | `INVALID_RESPONSE` | JSON·필수 구조 오류, 분리 가능한 외부 항목 오류, B 미정의 본문 코드, 불완전·위험한 snapshot | 없음 | 없음 |
 | `CAPACITY_EXCEEDED` | JVM 호출 허용량 부족, 연결 풀 대기 개수·시간 초과 | 없음 | 없음 |
 | `RESPONSE_TOO_LARGE` | 응답 codec의 유한한 크기 한도 초과 | 없음 | 없음 |
-| `CATALOG_UNAVAILABLE` | 활성 객실 매핑 없음 또는 예상된 DB 읽기 자원 실패 | Supplier 호출 안 함 | 해당 없음 |
+| `CATALOG_UNAVAILABLE` | 정상 반영 이력과 활성 객실 매핑이 모두 없음 또는 예상된 DB 읽기 자원 실패 | Supplier 호출 안 함 | 해당 없음 |
 | `INTERNAL_ERROR` | Supplier 배치 처리·카탈로그 처리의 미분류 내부 예외 | 없음 | 없음 |
 | `UNKNOWN` | 위에 매핑되지 않은 HTTP 오류 상태 또는 응답 읽기 실패 | 없음 | 없음 |
 
-HTTP 오류 상태와 B의 HTTP 200 본문 오류는 별도 경계에서 변환한다. B 본문 실패 매핑은 검색·카탈로그가 하나의 전용 매퍼를 공유한다. transport는 중첩 원인을 확인하여 timeout·버퍼·연결 풀 오류를 분류한다. `403` 등 미정의 HTTP 오류 상태를 임의로 인증 실패에 포함하지 않는다.
+HTTP 오류 상태와 B의 HTTP 200 본문 오류는 별도 경계에서 변환한다. B 본문 실패 매핑은 검색·카탈로그가 하나의 전용 매퍼를 공유한다. transport는 중첩 원인을 확인하여 timeout·버퍼·연결 풀 오류를 분류한다. HTTP 200 헤더를 받은 뒤 본문 수신이 멈춰 `WebClientResponseException`으로 감싸진 읽기 timeout도 `TIMEOUT`으로 분류하며, 카탈로그에만 같은 retry 규칙을 적용한다. `403` 등 미정의 HTTP 오류 상태를 임의로 인증 실패에 포함하지 않는다.
 
 | 실패 범위 | 보존하는 결과·상태 |
 | --- | --- |
 | 검색의 분리 가능한 항목 오류 | 정상 형제 Offer와 다른 배치 유지. 거부 수·`INVALID_RESPONSE`로 `PARTIAL` 계산 |
 | 검색 JSON 전체·envelope·호출·내부 mapper 오류 | 해당 배치 실패. 다른 완료 배치·Supplier 결과 유지 |
 | 검색 전체 예산 소진 | 완료 배치 유지. 진행 호출 취소, 시작 전·미완료 배치는 `TIMEOUT`으로 집계 |
-| 카탈로그 조회·검증·저장 실패 | 해당 Supplier 기존 매핑과 누락 횟수 유지. 저장 중 오류는 트랜잭션 rollback, 다음 Supplier 계속 처리 |
+| 카탈로그 조회·검증·저장 실패 | 해당 Supplier 기존 매핑·누락 횟수·준비 상태 유지. 저장 중 오류는 트랜잭션 rollback, 다음 Supplier 계속 처리 |
 | 예상된 DB 읽기 실패 | Supplier HTTP를 시작하지 않고 모든 활성 Supplier에 `CATALOG_UNAVAILABLE`, HTTP 503 / `FAILED` |
 
-정상 내부 ID·계산 결과의 불변식 위반을 외부 입력 오류로 숨기지 않는다. Supplier 배치 안의 내부 오류는 `INTERNAL_ERROR`와 ERROR 로그로 남기지만, 배치 바깥의 예상하지 못한 DB·응답 조립 오류까지 모두 부분 실패로 바꾸지는 않는다. 그런 오류는 서버 오류로 전파된다. 정규화 거부 로그에는 호출 출처·후보 Supplier, 항목 순번, 사용할 수 있는 내부 ID와 원인 예외를 남긴다. 고객 응답에는 내부 예외 내용을 넣지 않는다.
+정상 내부 ID·계산 결과의 불변식 위반을 외부 입력 오류로 숨기지 않는다. Supplier 배치 안의 내부 오류는 `INTERNAL_ERROR`와 ERROR 로그로 남기지만, 배치 바깥의 예상하지 못한 DB·응답 조립 오류까지 모두 부분 실패로 바꾸지는 않는다. 그런 오류는 서버 오류로 전파된다. 정규화 거부의 추적·상세 로그 한도는 [관측 가능성과 해석](#observability)을 따른다. 고객 응답에는 내부 예외 내용을 넣지 않는다.
 
-`CATALOG_UNAVAILABLE`은 Supplier 서버 장애를 단정하는 코드가 아니다. 현재 영속 동기화 상태가 없어 정상 빈 카탈로그·최초 동기화 미완료·사용 가능한 매핑 부재를 구별하지 못하고, 예상된 DB 읽기 실패도 같은 공개 코드로 나타낸다. 상세 DB 원인은 로그와 지표로 구분한다. 공개 API에서 원인별 대응이 필요해지면 별도 코드·상태 모델을 검토한다.
+`CATALOG_UNAVAILABLE`은 Supplier 서버 장애를 단정하는 코드가 아니다. 정상 빈 카탈로그는 성공으로 구분하지만, 최초 미준비와 예상된 DB 읽기 실패는 같은 공개 코드를 사용한다. 상세 DB 원인은 로그와 지표로 구분한다.
 
 <a id="catalog-sync"></a>
 ## 카탈로그 동기화와 매핑 생명주기
@@ -280,6 +284,12 @@ guard는 조회 전부터 모든 HTTP 시도·retry backoff·snapshot 저장 com
 이 guard는 여러 JVM의 최초 INSERT 경쟁·누락 횟수 갱신 유실·저장 순서 역전을 해결하지 않는다. 현재는 단일 갱신 인스턴스와 직렬 스케줄로 그 실행 조건을 배제한다. Supplier가 순차 요청에도 오래된 snapshot을 반환하는지를 판별할 버전 계약도 없다.
 
 `Mono.defer`로 client를 호출하여 Publisher 생성 전 동기 실패에도 같은 제한 retry 규칙을 적용한다. 빈 Publisher는 잘못된 응답이며, snapshot Supplier가 호출 client와 다르면 저장하지 않고 내부 오류로 기록한다. HTTP 조회가 성공해도 DB 저장 실패는 retry하지 않는다. 마지막 동기화 성공은 저장이 끝난 뒤에만 기록한다.
+
+### 최초 반영과 정상 빈 카탈로그
+
+`supplier_catalog_state`는 Supplier를 기본 키로 가진다. 행의 존재는 정상 snapshot을 한 번 이상 반영했다는 뜻이며, 숙소·객실이 없는 최초 정상 snapshot도 포함한다. writer는 매핑 변경과 같은 트랜잭션에서 `INSERT ... ON CONFLICT DO NOTHING`으로 기록하므로 저장 실패 시 준비 상태도 rollback된다. 이후 동기화 실패로 이 기록을 지우지 않으며 애플리케이션 재시작 후에도 유지한다.
+
+[V3 migration](../src/main/resources/db/migration/V3__record_catalog_initialization.sql)은 기존 매핑이 있는 Supplier를 준비 상태로 채운다. 과거 성공 시각을 추정해 넣지는 않는다. 준비 상태는 최초 반영 여부만 나타내며 최신성이나 마지막 실행 성공 여부가 아니다. 매핑과 준비 상태를 같은 DB snapshot으로 읽는 방법은 [DB 조회](#database-budget)에 설명한다.
 
 ### Upsert·누락·재등장
 
@@ -303,7 +313,7 @@ guard는 조회 전부터 모든 HTTP 시도·retry backoff·snapshot 저장 com
 - Supplier 전체의 활성 숙소 또는 활성 숙소·객실 조합이 모두 누락됨.
 - 숙소 또는 객실 조합의 누락이 **10개 이상이면서 기존 활성 목록의 50%를 초과**함.
 
-일반적인 작은 변경에는 2회 연속 누락 규칙을 적용한다. 대형 부분 응답은 두 번 반복되어도 잘못된 비활성화가 될 수 있어 별도 격리가 필요하다. 10개·50%는 설정 가능한 초기 안전값이며 정상 변동의 관측값에서 도출한 운영 기준이 아니다. 실제 전체 상품 제거에는 별도 확인·운영 절차가 필요하지만 현재 관리자 승인 기능은 없다.
+일반적인 작은 변경에는 2회 연속 누락 규칙을 적용한다. 대형 부분 응답은 두 번 반복되어도 잘못된 비활성화가 될 수 있어 별도 격리가 필요하다. 10개·50%는 설정 가능한 초기 안전값이며 정상 변동의 관측값에서 도출한 운영 기준이 아니다. 정상적인 전체 상품·객실 제거도 이 조건에 걸리면 계속 거부되며, 최초 준비 상태를 기록했다고 이 보호를 해제하지 않는다. 공급사와 목록의 완전성을 확인한 뒤 특정 snapshot에 한정해 승인하는 복구 경로는 후속 설계 대상이다. 현재 수동 승인·강제 반영 기능은 없다.
 
 ### Supplier 비활성 설정
 
@@ -374,20 +384,20 @@ Supplier당 3,000개 숙소는 50개씩 60배치다. 동시 4개이면 최소 15
 
 ### 검색 projection과 연결 수명
 
-검색은 숙소·객실 내부 ID와 이름, 외부 코드만 담은 읽기 전용 projection을 조회한다. 데이터 projection은 SQL 한 번이며 Entity 전체 로딩이나 숙소 수에 비례하는 N+1은 없다. 활성 객실 매핑이 없는 enabled Supplier에는 HTTP를 보내지 않고 `CATALOG_UNAVAILABLE`을 기록한다.
+검색은 숙소·객실 내부 ID와 이름, 외부 코드만 담은 읽기 전용 projection과 최초 반영된 Supplier 집합을 조회하여 `ActiveCatalogSnapshot`으로 반환한다. 각 조회는 SQL 한 번이며 Entity 전체 로딩이나 숙소 수에 비례하는 N+1은 없다. 활성 객실 매핑이 없는 Supplier에는 HTTP를 보내지 않고 준비 상태에 따라 정상 빈 결과 또는 `CATALOG_UNAVAILABLE`을 반환한다.
 
 `ActiveCatalogMappingReader` 포트의 `long`은 epoch 시각이나 남은 Duration이 아니라 같은 JVM의 단조시계 절대 deadline이다. 검색 application은 이 시간과 `CatalogReadException`만 전달·처리하며 JPA/JDBC 트랜잭션, PostgreSQL timeout, SQLState 해석은 인프라 어댑터가 담당한다.
 
-reader는 `REQUIRES_NEW`, `readOnly` 트랜잭션으로 연결·설정 수명을 소유한다. 연결 획득 뒤 남은 예산을 다시 계산하고 같은 연결의 `set_config(..., true)`로 다음 값을 설정한다.
+reader는 `REQUIRES_NEW`, `readOnly`, `REPEATABLE_READ` 트랜잭션으로 연결·설정 수명을 소유한다. 최초 동기화 commit과 경합해도 매핑과 준비 상태를 같은 DB snapshot에서 읽는다. 연결 획득 뒤와 준비 상태 조회 직전에 남은 예산을 계산하고 같은 연결의 `set_config(..., true)`로 다음 값을 설정한다.
 
 ```text
 statement timeout = min(읽기 statement 한도, 잔여 예산)
 lock timeout      = min(읽기 lock 한도, 잔여 예산)
 ```
 
-설정 검증에서 lock 한도가 statement 한도 이하임을 강제한다. 예산이 소진되면 데이터 SQL을 실행하지 않고, 양수의 밀리초 미만 잔여 시간은 올림하여 0이 무제한으로 해석되지 않게 한다. 데이터 조회와 트랜잭션 종료 뒤에도 deadline을 검사한다. `JdbcTemplate`은 JPA와 같은 DataSource·트랜잭션 연결을 사용하고, transaction-local 설정은 종료 후 원래 session 값으로 돌아간다.
+설정 검증에서 lock 한도가 statement 한도 이하임을 강제한다. 예산이 소진되면 데이터 SQL을 실행하지 않고, 양수의 밀리초 미만 잔여 시간은 올림하여 0이 무제한으로 해석되지 않게 한다. 첫 매핑 조회에 사용한 시간은 다음 준비 상태 조회의 timeout에서 차감한다. 각 데이터 조회와 트랜잭션 종료 뒤에도 deadline을 검사한다. `JdbcTemplate`은 JPA와 같은 DataSource·트랜잭션 연결을 사용하고, transaction-local 설정은 종료 후 원래 session 값으로 돌아간다.
 
-정상 조회는 **timeout 설정 SELECT 1개 + 데이터 projection SELECT 1개**를 실행한다. BEGIN/COMMIT 등 제어문은 제외한 개수다. 설정문은 직접 JDBC로 실행하므로 Hibernate 통계만으로 총 SQL 수를 세지 않는다. 추가 왕복은 연결 획득에 사용한 시간을 제외한 요청별 잔여 예산을 반영하는 비용이다. 연결 초기화의 고정 timeout은 왕복을 줄일 수 있지만 이 잔여 예산을 반영하지 못한다. 변경 전후 DB 구간 지연은 실측하지 않았다.
+정상 조회는 **timeout 설정 SELECT 2개 + 매핑 projection SELECT 1개 + 준비 상태 SELECT 1개**, 총 4개를 실행한다. BEGIN/COMMIT 등 제어문은 제외한 개수다. 설정문은 직접 JDBC로 실행하므로 Hibernate 통계만으로 총 SQL 수를 세지 않는다. 추가 왕복은 준비 상태를 함께 읽고 각 데이터 조회에 잔여 예산을 반영하는 비용이다. 연결 초기화의 고정 timeout은 이 잔여 예산을 반영하지 못한다. 변경 전후 DB 구간 지연은 실측하지 않았다.
 
 ### 기본값과 각 경계의 한계
 
@@ -438,9 +448,13 @@ reader는 트랜잭션 시작·조회·종료 전체 바깥에서 알려진 자�
 
 별도의 활성 카탈로그 매핑 수 지표와 거부 항목별 상세 사유 지표는 현재 없다. `supplier.offers{outcome=REJECTED}`는 건수, 구체 원인은 정규화 로그에서 확인한다. Supplier·작업·정해진 결과 코드처럼 종류가 제한된 태그를 사용하고 숙소·객실 코드나 예외 메시지를 태그로 넣지 않는다.
 
+검색 진입마다 생성한 `searchId`와 Supplier 안의 `batchIndex`를 Reactor Context의 `SearchCallContext`로 어댑터·정규화기에 전달한다. 검색 완료·배치 실패·정규화 거부 로그를 같은 요청으로 연결하며 고객 응답이나 지표 태그에는 이 식별자를 넣지 않는다. 정규화 거부 상세는 배치당 최대 5개로 제한하고, 거부가 있으면 전체 거부·샘플·생략 건수를 집계 로그 하나에 남긴다. 상세에는 호출 출처·후보 Supplier, 항목 순번, 읽을 수 있는 외부 숙소·객실 코드와 내부 ID, 원인 유형·메시지를 넣으며 항목마다 stack trace를 출력하지 않는다.
+
+외부 코드는 파싱 실패 전에도 문자열 필드에서 얻을 수 있으면 기록하고 없거나 다른 타입이면 `UNKNOWN`으로 표시한다. 외부 코드는 최대 120자, 원인 메시지는 최대 240자로 제한하며 제어·개행·서식 문자를 공백으로 바꾼다. 원본 응답·API 키는 기록하지 않는다. 이 제한은 배치당 로그 정책이며 검색 전체 로그 수나 처리량 개선을 보장하지 않는다.
+
 B의 HTTP 200 본문 `E503`은 호출 지표에서 FAILED/UNAVAILABLE이며 잘못된 항목만 제외한 호출은 PARTIAL/INVALID_RESPONSE다. 검색 deadline에서 취소된 진행 호출은 CANCELLED다. 시작되지 않은 배치는 호출 시도 지표에 넣지 않지만 최종 Supplier 결과에는 TIMEOUT이 남는다. `search.requests`는 검색 서비스 구간으로 고객 HTTP 전체 완료 시간을 뜻하지 않는다.
 
-카탈로그 HTTP 성공만으로 신선도를 갱신하지 않는다. 저장 실패면 마지막 성공을 유지하고 연속 실패 수를 늘린다. 이 상태는 메모리에 있어 재시작하면 초기화된다. 마지막 성공 0을 epoch부터의 경과 시간으로 빼면 기동 직후부터 오래된 데이터로 오인하고, 무조건 제외하면 최초 동기화가 계속 실패하는 상태를 놓친다. 운영 알림은 기동 유예 기간 뒤에도 0인지, 마지막 성공 이후 경과 시간과 연속 실패 수가 어떤지를 나눠 보아야 한다. 이러한 알림 규칙 자체는 구현하지 않았다.
+카탈로그 HTTP 성공만으로 신선도를 갱신하지 않는다. 저장 실패면 마지막 성공을 유지하고 연속 실패 수를 늘린다. 이 지표 상태는 메모리에 있어 재시작하면 초기화되며, DB의 영속 준비 상태와 별개다. 마지막 성공 0을 epoch부터의 경과 시간으로 빼면 기동 직후부터 오래된 데이터로 오인하고, 무조건 제외하면 최초 동기화가 계속 실패하는 상태를 놓친다. 운영 알림은 기동 유예 기간 뒤에도 0인지, 마지막 성공 이후 경과 시간과 연속 실패 수가 어떤지를 나눠 보아야 한다. 이러한 알림 규칙 자체는 구현하지 않았다.
 
 <a id="extension-conditions"></a>
 ## 감수한 제약과 확장 조건
@@ -455,7 +469,8 @@ B의 HTTP 200 본문 `E503`은 호출 지표에서 FAILED/UNAVAILABLE이며 잘�
 | 다중 동기화 인스턴스 | 자동 failover나 다중 writer가 필요할 때 PostgreSQL advisory lock 또는 분산 스케줄 잠금 검토 |
 | 카탈로그 Supplier 병렬화 | Supplier 수·순차 지연이 복구 목표를 넘을 때 Supplier 단위 제한 병렬 실행 |
 | 검색·쓰기 최적화 | 대표 데이터의 `EXPLAIN ANALYZE`와 쓰기 시간으로 병목을 확인한 뒤 인덱스, JDBC batch·변경분 갱신·staging 검토. `IDENTITY`의 batch 제약도 확인 |
-| 영속 동기화 상태 | 재시작을 넘어 lastAttempt/lastSuccess·상태·건수나 정상 빈 목록을 구분해야 할 때 상태 테이블 도입 |
+| 영속 동기화 이력 | 최초 반영 여부는 영속화했다. 재시작을 넘어 lastAttempt/lastSuccess·실패 원인·건수까지 추적해야 할 때 상태·이력 확장 |
+| 거부된 정상 snapshot 복구 | 공급사 확인을 거쳐 특정 snapshot에 한정한 승인·감사·동시 실행 방지 경로를 설계. 반복 수신만으로 자동 승인하지 않음 |
 | 정규화 실패 격리 저장 | 구조화 로그만으로 반복 오류 분석이 어려워질 때 보존 대상·기간·민감 값 처리 정책과 함께 검토 |
 | 표준 숙소·통화·요금제 | 공통 식별 근거, 환율·반올림, 취소·결제 조건과 상품 식별 계약이 생겼을 때 각각 확장 |
 | 예약·취소 | 실제 실행 요구가 생기면 재고·가격 재확인, 멱등성·보상 정책을 함께 설계 |
@@ -513,18 +528,20 @@ OPEN 대기 뒤 **다음 실제 요청**이 HALF_OPEN을 시작하며 별도 pro
 | 검증 경계 | 정식 테스트 |
 | --- | --- |
 | 금액·날짜·재고·인원·불변식 | `PriceTests`, `StayInventoryTests`, `SearchCriteriaTests`, `OfferCandidateTests` |
-| 후보 오류 격리·내부 mapper 오류 | `OfferNormalizerTests`, `SupplierMappingFailureTests` |
+| 후보 오류 격리·내부 mapper 오류·거부 로그 한도와 안전한 문맥 | `OfferNormalizerTests`, `SupplierMappingFailureTests` |
+| WebClient 디코딩의 요청·배치 로그 연결과 외부 키·거부 샘플 | `SupplierOfferLoggingTests` |
 | A/B 프로토콜·실제 Boot codec·중복·수용 인원 충돌·특수 코드·응답 크기 | `SupplierAdapterContractTests`, `SupplierSearchClientTests`, `SupplierCatalogClientTests` |
-| HTTP·B 본문·transport 오류와 retry 가능 여부 | `SupplierFailureMapperTests`, `SupplierAdapterContractTests` |
+| HTTP·B 본문·transport 오류와 retry 가능 여부·본문 수신 중 timeout | `SupplierFailureMapperTests`, `SupplierAdapterContractTests`, `SupplierCatalogBodyTimeoutTests` |
 | 분할·병렬성·deadline·부분/전체 실패·메타데이터 결합 | `IntegratedSearchServiceTests` |
 | 고객 JSON·입력 400·부분 200·전체 503 | `StaySearchControllerTests` |
 | snapshot 검증·누락·재활성화·client 계약·retry·저장 지표 | `CatalogSnapshotTests`, `CatalogSnapshotWriterTests`, `CatalogSynchronizationServiceTests` |
-| 실제 PostgreSQL commit/rollback·ID 유지·Supplier별 독립 반영 | `CatalogCommitBoundaryTests`, `CatalogRepositoryTests` |
+| 실제 PostgreSQL commit/rollback·ID 유지·준비 상태 원자성·V3 migration·Supplier별 독립 반영 | `CatalogCommitBoundaryTests`, `CatalogRepositoryTests` |
 | PostgreSQL 잠금·느린 SQL·연결 부족·회복·transaction-local 설정 복원 | `CatalogReadTimeoutIntegrationTests`, `JpaActiveCatalogMappingReaderTests` |
 | 서비스 직접 호출의 중복 guard·조회/retry/저장 보호 | `CatalogSynchronizationConcurrencyTests` |
 | 허용량 반환·실제 HTTP와 연결 풀 격리·취소·큰 응답·지표 | `SupplierCallResourcesTests`, `SupplierResourceIntegrationTests` |
 | 별도 메인/Mock JVM·PostgreSQL·스케줄 commit·고객 HTTP 전체 연결 | `SupplierHubEndToEndTests` (`e2eTest`) |
+| 최초 미준비·정상 빈 카탈로그·재시작 후 준비 상태 유지·부분 성공 | `CatalogReadinessEndToEndTests` (`e2eTest`) |
 
-E2E는 PostgreSQL 17 Testcontainers와 메인·Mock 실행 JAR을 별도 JVM으로 실행한다. 정상 1박·3박 가격과 연박 재고, DB 내부 ID·이름, 인원 초과, 입력 400, A HTTP·B 본문 오류, 전체 503, 지연 timeout, 실제 DB 잠금과 회복을 확인한다. 직접 서비스 호출이나 HTTP 테스트 대역만으로 이 연결을 대신하지 않는다. 임시 디렉터리·자동 배정 포트를 사용하고 종료 시 자원을 정리한다.
+기존 E2E는 PostgreSQL 17 Testcontainers와 메인·Mock 실행 JAR을 별도 JVM으로 실행한다. 정상 1박·3박 가격과 연박 재고, DB 내부 ID·이름, 인원 초과, 입력 400, A HTTP·B 본문 오류, 전체 503, 지연 timeout, 실제 DB 잠금과 회복을 다룬다. 추가한 카탈로그 준비 상태 E2E는 실제 PostgreSQL·메인 JAR에 테스트 JVM의 HTTP 서버를 연결해 빈 목록·목록 실패를 재현하고, 재동기화 없이 앱을 재시작하는 경우까지 다룬다. 임시 디렉터리·자동 배정 포트를 사용하고 종료 시 자원을 정리한다. 이 표는 테스트 범위이며 실행 성공 여부는 아래 기록에서 확인한다.
 
 `./gradlew test`는 메인·Mock 테스트, `./gradlew check`는 E2E까지 실행한다. 최근 실행 결과와 재사용 여부는 [개발 기록](../JOURNAL.md)과 [전체 연결 검증](e2e-verification.md)에 남기며 이 설계 문서에 시점별 테스트 건수를 중복 기록하지 않는다. 자원 테스트에서 낮춘 한도의 격리·반환을 확인한 결과는 기본값의 운영 처리 용량 측정과 다르다. 단일 실행 시간과 fixture 수용을 실제 부하 용량·GC 개선·엄격한 HTTP 완료 상한의 증명으로 사용하지 않는다.
