@@ -1,14 +1,15 @@
 # 중간 기술 감사: 요구사항과 정확성
 
-> 후속 상태(2026-09-16): C-01~C-04의 8-A 수정과 정식 회귀 검증을 완료했다. 중복·수용 인원 충돌의 최종 정책과 근거는 [설계 §16](architecture-decisions.md#16-8-a-입력중복예외-계약-보완)에 기록했다. 아래 관측·줄 번호·미수정 표현은 감사 기준 커밋 당시 기록이다.
+> 보관 기록: 감사·계획 당시의 판단과 수치를 보존한다. 현재 계약은 [설계](../architecture-decisions.md), 최종 대응은 [요구사항 검증](../requirements-verification.md)을 확인한다.
+> 후속 상태(2026-09-16): C-01~C-04의 입력·예외 보완 수정과 정식 회귀 검증을 완료했다. 중복·수용 인원 충돌의 최종 정책과 근거는 [설계](../architecture-decisions.md)에 기록했다. 아래 관측·줄 번호·미수정 표현은 감사 기준 커밋 당시 기록이다.
 
 ## 1. 범위와 기준점
 
 - 작성일: 2026-09-15
 - 기준 커밋: `eff5bb83a940d8d29a778b9de0d041d888771388`
-- 범위: 7.5-A. 통합 모델, Supplier 계약, 검색 결과, 매핑 생명주기, 실패 의미, 관련 테스트와 설계 문서 대조
+- 범위: 정확성. 통합 모델, Supplier 계약, 검색 결과, 매핑 생명주기, 실패 의미, 관련 테스트와 설계 문서 대조
 - 산출물: 확인한 문제, 재현 조건, 수정 후보, 미검증 항목. 이번 감사에서는 제품 코드와 저장소의 테스트 소스를 변경하지 않았다.
-- 후속 범위: SQL 수와 실행 계획, 동시 동기화, 전역 자원 제한, 메모리 프로파일, 전체 구조 감사는 각각 7.5-B/C/D에서 수행한다.
+- 후속 범위: SQL 수와 실행 계획, 동시 동기화, 전역 자원 제한, 메모리 프로파일, 전체 구조 감사는 각각 DB·네트워크·구조 감사에서 수행한다.
 
 아래 내용은 현재 구현에 대한 자체 분석이다. 요구사항 충족 여부와 검증의 깊이를 구분한다.
 
@@ -18,10 +19,10 @@
 
 | ID | 우선순위 | 확인한 문제 | 제안 시점 |
 | --- | --- | --- | --- |
-| C-01 | P1 | 소수 금액·재고를 정수로 변환하며 잘못된 값을 정상 수용한다. 음수 소수 금액도 0원 상품이 된다. | 8-A 최우선 |
+| C-01 | P1 | 소수 금액·재고를 정수로 변환하며 잘못된 값을 정상 수용한다. 음수 소수 금액도 0원 상품이 된다. | 입력·예외 보완 최우선 |
 | C-02 | P2 | 정상 JSON 내 한 항목의 타입·날짜 오류가 정상 형제 Offer까지 제거한다. | C-01과 같은 입력 경계 변경에서 해결 |
-| C-03 | P2 | 동일 Offer를 중복 수용하며 충돌하는 동일 상품의 처리 규칙이 없다. | 8-A |
-| C-04 | P2 | 허용한 숙소 코드의 특수문자가 요청에서 바뀌거나 URI 생성에 실패한다. | 8-A |
+| C-03 | P2 | 동일 Offer를 중복 수용하며 충돌하는 동일 상품의 처리 규칙이 없다. | 입력·예외 보완 |
+| C-04 | P2 | 허용한 숙소 코드의 특수문자가 요청에서 바뀌거나 URI 생성에 실패한다. | 입력·예외 보완 |
 
 P1은 잘못된 금액을 고객에게 제공하는 문제, P2는 특정 응답·식별자에서 결과가 중복되거나 정상 상품 조회가 손실되는 문제로 사용한다. 네트워크 규모나 DB 동시성에 대해서는 이번 결과만으로 결함 또는 안전성을 단정하지 않는다.
 
@@ -163,30 +164,30 @@ A/B의 `+`, 중괄호, `%`, `&`, `=`, 공백·비ASCII 코드의 서버 수신�
 | --- | --- | --- | --- |
 | Java·Spring Boot·Gradle·관계형 DB | `build.gradle.kts`, migration, datasource 설정 | 빌드 및 PostgreSQL 테스트 성공 | 기본 스택 근거 있음 |
 | Supplier 인증 헤더 | `SupplierClientConfiguration`의 `X-Api-Key` 기본 헤더 | `SupplierSearchClientTests.supplierARequestsExactContractAndNormalizesNightlyPrices`, `SupplierCatalogClientTests`의 A/B 헤더 확인 | 전송 계약 근거 있음. Mock 자체의 인증 검증을 의미하지 않음 |
-| 날짜별 가격·세금 합산 | `SupplierASearchClient`, `Price`, `Money` | `PriceTests.sumsNightlyNetRatesAndTaxesAsGrossStayTotal`, `SupplierSearchClientTests.supplierARequestsExactContractAndNormalizesNightlyPrices` | 설계 §5. 정수 정상 입력 근거 있음; C-01 |
-| 세금 포함 총액 유지 | `SupplierBSearchClient`, `Price.totalOnly` | `supplierBRequestsExactContractAndPreservesTaxIncludedTotal`, `supplierBExcludesItemWhoseTotalDoesNotIncludeTax` | 설계 §5. 정상·세금 규약 검증 있음 |
-| 통화·조식 의미 보존 | `Money`, `Offer`, `StaySearchResponse` | B 계약 및 API 응답 테스트 | 설계 §3/5. 환산·임의 통합 제외는 합리적 |
-| 숙박일 경계·연박 재고 | `StayDateCoverage`, `StayInventory` | `StayInventoryTests`, `SearchCriteriaTests` | 설계 §6. 누락·중복·범위 초과·품절 검증 있음 |
-| 내부 ID 안정성 | `CatalogSnapshotWriter`, `Property`, `RoomType` | `CatalogSnapshotWriterTests`의 갱신·누락·재등장 테스트 | 설계 §4/9. 트랜잭션을 나눈 재시작 후 검증은 보강 필요 |
-| 객실 코드의 숙소별 유일성 | DB unique, `SupplierItemKey` | `CatalogRepositoryTests.allowsSameRoomTypeCodeInDifferentProperties` 등 | 설계 §3/4. DB 근거 있음; HTTP 두 숙소 동일 객실 코드 검증 추가 후보 |
-| 목록 동기화·실패 보존 | catalog clients, scheduler, writer | catalog client/service/writer/scheduler 테스트 | 설계 §9. DB 쓰기 중 실패의 rollback·다른 Supplier 성공 commit 검증은 미완 |
-| Supplier별 DTO 격리 | 각 client의 private record, 공통 포트 | A/B 요청 계약 테스트 | 설계 §10. 근거 있음; 변환 전 오류 격리는 C-02 |
-| 활성 매핑 전체 조회·50개 분할 | `JpaActiveCatalogMappingReader`, `IntegratedSearchService` | repository projection, `splitsFiftyOnePropertiesIntoFiftyAndOne` | 설계 §10. 근거 있음 |
+| 날짜별 가격·세금 합산 | `SupplierASearchClient`, `Price`, `Money` | `PriceTests.sumsNightlyNetRatesAndTaxesAsGrossStayTotal`, `SupplierSearchClientTests.supplierARequestsExactContractAndNormalizesNightlyPrices` | 설계 정수 정상 입력 근거 있음; C-01 |
+| 세금 포함 총액 유지 | `SupplierBSearchClient`, `Price.totalOnly` | `supplierBRequestsExactContractAndPreservesTaxIncludedTotal`, `supplierBExcludesItemWhoseTotalDoesNotIncludeTax` | 설계 정상·세금 규약 검증 있음 |
+| 통화·조식 의미 보존 | `Money`, `Offer`, `StaySearchResponse` | B 계약 및 API 응답 테스트 | 설계/5. 환산·임의 통합 제외는 합리적 |
+| 숙박일 경계·연박 재고 | `StayDateCoverage`, `StayInventory` | `StayInventoryTests`, `SearchCriteriaTests` | 설계 누락·중복·범위 초과·품절 검증 있음 |
+| 내부 ID 안정성 | `CatalogSnapshotWriter`, `Property`, `RoomType` | `CatalogSnapshotWriterTests`의 갱신·누락·재등장 테스트 | 설계/9. 트랜잭션을 나눈 재시작 후 검증은 보강 필요 |
+| 객실 코드의 숙소별 유일성 | DB unique, `SupplierItemKey` | `CatalogRepositoryTests.allowsSameRoomTypeCodeInDifferentProperties` 등 | 설계/4. DB 근거 있음; HTTP 두 숙소 동일 객실 코드 검증 추가 후보 |
+| 목록 동기화·실패 보존 | catalog clients, scheduler, writer | catalog client/service/writer/scheduler 테스트 | 설계 DB 쓰기 중 실패의 rollback·다른 Supplier 성공 commit 검증은 미완 |
+| Supplier별 DTO 격리 | 각 client의 private record, 공통 포트 | A/B 요청 계약 테스트 | 설계 근거 있음; 변환 전 오류 격리는 C-02 |
+| 활성 매핑 전체 조회·50개 분할 | `JpaActiveCatalogMappingReader`, `IntegratedSearchService` | repository projection, `splitsFiftyOnePropertiesIntoFiftyAndOne` | 설계 근거 있음 |
 | Supplier 병렬 실행 | 서비스의 `flatMap` | `startsDifferentSuppliersBeforeEitherOneCompletes` | 서비스 수준 동시 시작 검증 있음; 실제 HTTP 병렬 E2E는 미완 |
-| 연결·응답·호출 timeout | `SupplierClientConfiguration`, 검색 client | A call timeout 테스트, 서비스 전체 시간 제한 테스트 | 설계 §10. 값·이유 있음; 각 timeout 독립 검증은 미완 |
-| HTTP·본문 실패 통일 | HTTP mapper, B `bodyFailure` | A 상태 오류와 B `E503`, HTTP 429 테스트 | 설계 §8. 근거 있음; 전체 오류 코드 표 테스트는 보강 후보 |
-| 정상 빈 결과·부분·전체 실패 | 서비스 상태 집계, controller | `treatsNormalEmptyResultAsSuccessBesideFailedSupplier`, `reportsFailedWhenEverySupplierCallFails`, API 상태 테스트 | 설계 §8. 대표 상태 근거 있음; 아래 정책 경계 확인 필요 |
-| 고객 응답 최소 정보·원본 코드 비노출 | `StaySearchResponse` | `returnsGroupedCustomerSearchResponseWithoutSupplierCodes` | 설계 §8. Supplier 출처 표시는 유지하고 원본 숙소·객실 코드를 숨김 |
-| 정상·장애·무응답 Mock | 별도 모듈, 모드 전환, 기본 포트 18080 | Mock 6개 테스트, 별도 HTTP 서버의 A timeout 테스트 | 전체 실제 연동 E2E는 8-D |
-| 신규 Supplier 추가 절차 | enum, 설정, client bean, 공통 포트 | 기존 A/B 계약 테스트 | 설계 §10.1. 기존 파일 변경은 남지만 검색 로직 분기 추가는 불필요 |
-| 실행·설계 문서 | `docs/architecture-decisions.md`, `JOURNAL.md` | 문서와 주요 구현 대조 | 루트 `README.md`에 초기 실행 안내 제공. 9단계에서 전체 재현·최종 내용 확정 |
-| 선택 기능과 규모 한계 | 제한 병렬성, 재시도 선택 | 관련 서비스 테스트 | 설계 §10/15. 캐시·서킷 브레이커·상품 병합 구현을 추가 요구하지 않음 |
+| 연결·응답·호출 timeout | `SupplierClientConfiguration`, 검색 client | A call timeout 테스트, 서비스 전체 시간 제한 테스트 | 설계 값·이유 있음; 각 timeout 독립 검증은 미완 |
+| HTTP·본문 실패 통일 | HTTP mapper, B `bodyFailure` | A 상태 오류와 B `E503`, HTTP 429 테스트 | 설계 근거 있음; 전체 오류 코드 표 테스트는 보강 후보 |
+| 정상 빈 결과·부분·전체 실패 | 서비스 상태 집계, controller | `treatsNormalEmptyResultAsSuccessBesideFailedSupplier`, `reportsFailedWhenEverySupplierCallFails`, API 상태 테스트 | 설계 대표 상태 근거 있음; 아래 정책 경계 확인 필요 |
+| 고객 응답 최소 정보·원본 코드 비노출 | `StaySearchResponse` | `returnsGroupedCustomerSearchResponseWithoutSupplierCodes` | 설계 Supplier 출처 표시는 유지하고 원본 숙소·객실 코드를 숨김 |
+| 정상·장애·무응답 Mock | 별도 모듈, 모드 전환, 기본 포트 18080 | Mock 6개 테스트, 별도 HTTP 서버의 A timeout 테스트 | 전체 실제 연동 E2E는 전체 연결 검증 |
+| 신규 Supplier 추가 절차 | enum, 설정, client bean, 공통 포트 | 기존 A/B 계약 테스트 | 설계 기존 파일 변경은 남지만 검색 로직 분기 추가는 불필요 |
+| 실행·설계 문서 | `docs/architecture-decisions.md`, `JOURNAL.md` | 문서와 주요 구현 대조 | 루트 `README.md`에 초기 실행 안내 제공. 최종 문서·실행 검증에서 전체 재현·최종 내용 확정 |
+| 선택 기능과 규모 한계 | 제한 병렬성, 재시도 선택 | 관련 서비스 테스트 | 설계/15. 캐시·서킷 브레이커·상품 병합 구현을 추가 요구하지 않음 |
 
 ## 6. 오류로 단정하지 않는 정책·검증 경계
 
 ### 6.1 모든 항목이 잘못된 응답
 
-`IntegratedSearchService.aggregate`는 예외 없이 반환된 `SupplierSearchResult`를 성공한 호출 묶음으로 센다. 따라서 모든 항목이 거부돼도 Supplier는 `PARTIAL`이며, 모든 Supplier가 이 상태라면 전체도 `PARTIAL`이다. 이는 현재 설계 §7의 거부 건수 정책과 일치하므로 확정 버그로 분류하지 않는다.
+`IntegratedSearchService.aggregate`는 예외 없이 반환된 `SupplierSearchResult`를 성공한 호출 묶음으로 센다. 따라서 모든 항목이 거부돼도 Supplier는 `PARTIAL`이며, 모든 Supplier가 이 상태라면 전체도 `PARTIAL`이다. 이는 현재 설계의 거부 건수 정책과 일치하므로 확정 버그로 분류하지 않는다.
 
 다만 '일부 결과를 검증할 수 있음'과 '반환된 항목을 하나도 신뢰할 수 없음'을 같은 상태로 둘 것인지 명시해야 한다. 정상 빈 목록, 정상 품절만 있는 목록, 오류 항목만 있는 목록, 오류·품절 혼합, 전부 장애를 각각 테스트한다. 상태를 바꾼다면 API와 지표 의미를 함께 바꾼다.
 
@@ -218,14 +219,14 @@ writer 테스트는 `@DataJpaTest` 트랜잭션 안에서 여러 동기화를 �
 
 ## 7. 테스트 보강 우선순위
 
-### 8-A 수정과 함께 남길 테스트
+### 입력·예외 보완 수정과 함께 남길 테스트
 
 1. C-01/C-02: 엄격한 정수 검사와 항목별 파싱 격리를 A/B 모두 검증한다. 실제 Boot codec 설정 검증을 적어도 하나 유지한다.
 2. C-03: 완전 중복과 충돌, 유효한 서로 다른 판매 조건을 구분한다.
 3. C-04: HTTP 서버가 실제로 받은 코드가 원래 코드와 일치하는지 확인한다.
 4. 금액 합산 overflow, 인원 합산 overflow를 직접 검증한다. 기존 `Math.addExact` 및 `long` 인원 합산 코드는 있으나 해당 경계값의 직접 테스트는 확인되지 않았다.
 
-### 다음 감사·8단계에서 남길 테스트
+### 다음 감사·견고성 보완에서 남길 테스트
 
 - DB: 독립 트랜잭션 재동기화, 실패 rollback, Supplier 간 commit 격리, 동시 실행.
 - HTTP: A/B 오류 코드 표, 빈 body·필수 컨테이너 부재, 정상 빈 결과, 응답 timeout과 call timeout 구분.
@@ -235,12 +236,12 @@ writer 테스트는 `@DataJpaTest` 트랜잭션 안에서 여러 동기화를 �
 
 ## 8. 다음 작업과 종료 기준
 
-1. 7.5-B에서 DB 접근과 동시성 정합성을 감사한다.
-2. 7.5-C/D 결과와 합쳐 8단계 수정 범위를 확정한다.
-3. 8-A에서는 C-01/C-02를 먼저 함께 해결하고 C-03/C-04를 각각 검증 가능한 변경으로 처리한다.
-4. 9단계에 README와 설계·구현 대조를 완성한다.
+1. DB 감사에서 DB 접근과 동시성 정합성을 감사한다.
+2. 네트워크·구조 감사 결과와 합쳐 견고성 보완 수정 범위를 확정한다.
+3. 입력·예외 보완에서는 C-01/C-02를 먼저 함께 해결하고 C-03/C-04를 각각 검증 가능한 변경으로 처리한다.
+4. 최종 문서·실행 검증에 README와 설계·구현 대조를 완성한다.
 
-이번 7.5-A 감사는 완료했다. 정확성 개선 구현은 아직 완료하지 않았다. 기존 테스트 통과와 새로 재현한 문제를 모두 기준점으로 유지한다.
+이번 정확성 감사는 완료했다. 정확성 개선 구현은 아직 완료하지 않았다. 기존 테스트 통과와 새로 재현한 문제를 모두 기준점으로 유지한다.
 
 ## 9. DB 감사 후속 결과
 
