@@ -27,9 +27,6 @@ dependencies {
 	implementation("org.springframework.boot:spring-boot-starter-webclient")
 	implementation("org.springframework.boot:spring-boot-starter-webmvc")
 
-	compileOnly("org.projectlombok:lombok")
-	annotationProcessor("org.projectlombok:lombok")
-
 	runtimeOnly("org.postgresql:postgresql")
 	runtimeOnly("org.flywaydb:flyway-database-postgresql")
 
@@ -42,8 +39,6 @@ dependencies {
 	testImplementation("org.testcontainers:testcontainers-junit-jupiter")
 	testImplementation("org.testcontainers:testcontainers-postgresql")
 
-	testCompileOnly("org.projectlombok:lombok")
-	testAnnotationProcessor("org.projectlombok:lombok")
 	testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }
 
