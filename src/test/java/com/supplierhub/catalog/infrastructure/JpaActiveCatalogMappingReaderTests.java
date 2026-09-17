@@ -76,7 +76,7 @@ class JpaActiveCatalogMappingReaderTests {
 		JdbcTemplate jdbcTemplate = mock(JdbcTemplate.class);
 		PlatformTransactionManager transactions = mock(PlatformTransactionManager.class);
 		JpaActiveCatalogMappingReader reader = new JpaActiveCatalogMappingReader(
-			repository, jdbcTemplate, transactions,
+			repository, mock(CatalogSyncStateRepository.class), jdbcTemplate, transactions,
 			new CatalogDatabaseProperties(Duration.ofSeconds(1), Duration.ofMillis(300))
 		);
 
@@ -104,7 +104,7 @@ class JpaActiveCatalogMappingReaderTests {
 		IllegalStateException defect = new IllegalStateException("broken mapping implementation");
 		when(repository.findAllActiveMappingsForSearch()).thenThrow(defect);
 		JpaActiveCatalogMappingReader reader = new JpaActiveCatalogMappingReader(
-			repository, mock(JdbcTemplate.class), mock(PlatformTransactionManager.class),
+			repository, mock(CatalogSyncStateRepository.class), mock(JdbcTemplate.class), mock(PlatformTransactionManager.class),
 			new CatalogDatabaseProperties(Duration.ofSeconds(1), Duration.ofMillis(300))
 		);
 

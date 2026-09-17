@@ -21,6 +21,7 @@ import org.springframework.transaction.support.TransactionTemplate;
 
 import com.supplierhub.catalog.application.ActiveCatalogMapping;
 import com.supplierhub.catalog.application.ActiveCatalogMappingReader;
+import com.supplierhub.catalog.application.ActiveCatalogSnapshot;
 import com.supplierhub.catalog.application.CatalogReadException;
 import com.supplierhub.catalog.application.CatalogReadException.Reason;
 
@@ -28,6 +29,7 @@ import com.supplierhub.catalog.application.CatalogReadException.Reason;
 public class JpaActiveCatalogMappingReader implements ActiveCatalogMappingReader {
 
 	private final RoomTypeRepository roomTypeRepository;
+	private final CatalogSyncStateRepository syncStateRepository;
 	private final JdbcTemplate jdbcTemplate;
 	private final TransactionTemplate transaction;
 	private final long statementTimeoutNanos;
@@ -35,14 +37,18 @@ public class JpaActiveCatalogMappingReader implements ActiveCatalogMappingReader
 
 	public JpaActiveCatalogMappingReader(
 		RoomTypeRepository roomTypeRepository,
+		CatalogSyncStateRepository syncStateRepository,
 		JdbcTemplate jdbcTemplate,
 		PlatformTransactionManager transactionManager,
 		CatalogDatabaseProperties properties
 	) {
 		this.roomTypeRepository = roomTypeRepository;
+		this.syncStateRepository = syncStateRepository;
 		this.jdbcTemplate = jdbcTemplate;
 		this.transaction = new TransactionTemplate(transactionManager);
 		this.transaction.setReadOnly(true);
+		// 최초 동기화 commit과 겹쳐도 매핑과 준비 상태를 서로 다른 시점에서 읽지 않는다.
+		this.transaction.setIsolationLevel(TransactionDefinition.ISOLATION_REPEATABLE_READ);
 		// 외부 트랜잭션이 있어도 반환 전에 조회 연결과 임시 설정을 정리한다.
 		this.transaction.setPropagationBehavior(
 			TransactionDefinition.PROPAGATION_REQUIRES_NEW
@@ -52,19 +58,22 @@ public class JpaActiveCatalogMappingReader implements ActiveCatalogMappingReader
 	}
 
 	@Override
-	public List<ActiveCatalogMapping> findAllActive(long deadlineNanos) {
+	public ActiveCatalogSnapshot findAllActive(long deadlineNanos) {
 		remainingNanos(deadlineNanos);
 		try {
-			List<ActiveCatalogMapping> mappings = transaction.execute(status -> {
+			ActiveCatalogSnapshot snapshot = transaction.execute(status -> {
 				configureTimeouts(deadlineNanos);
 				remainingNanos(deadlineNanos);
 				List<ActiveCatalogMapping> rows = roomTypeRepository
 					.findAllActiveMappingsForSearch();
 				remainingNanos(deadlineNanos);
-				return rows;
+				configureTimeouts(deadlineNanos);
+				var initialized = syncStateRepository.findInitializedSuppliers();
+				remainingNanos(deadlineNanos);
+				return new ActiveCatalogSnapshot(rows, initialized);
 			});
 			remainingNanos(deadlineNanos);
-			return mappings;
+			return snapshot;
 		} catch (RuntimeException exception) {
 			if (exception instanceof CatalogReadException) {
 				throw exception;

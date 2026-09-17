@@ -64,6 +64,9 @@ class CatalogReadTimeoutIntegrationTests {
 	private RoomTypeRepository roomTypeRepository;
 
 	@Autowired
+	private CatalogSyncStateRepository syncStateRepository;
+
+	@Autowired
 	private JdbcTemplate jdbcTemplate;
 
 	@Autowired
@@ -114,7 +117,7 @@ class CatalogReadTimeoutIntegrationTests {
 		}
 
 		assertThat(settings()).isEqualTo(baseline);
-		assertThat(mappingReader.findAllActive(deadline(Duration.ofSeconds(2)))).isEmpty();
+		assertThat(mappingReader.findAllActive(deadline(Duration.ofSeconds(2))).mappings()).isEmpty();
 		assertPoolIdle();
 	}
 
@@ -139,7 +142,7 @@ class CatalogReadTimeoutIntegrationTests {
 		assertThat(Duration.ofNanos(System.nanoTime() - started)).isLessThan(Duration.ofSeconds(2));
 		assertPoolIdle();
 		assertThat(settings()).isEqualTo(baseline);
-		assertThat(mappingReader.findAllActive(deadline(Duration.ofSeconds(2)))).isEmpty();
+		assertThat(mappingReader.findAllActive(deadline(Duration.ofSeconds(2))).mappings()).isEmpty();
 		assertPoolIdle();
 	}
 
@@ -160,7 +163,7 @@ class CatalogReadTimeoutIntegrationTests {
 		}
 
 		assertPoolIdle();
-		assertThat(mappingReader.findAllActive(deadline(Duration.ofSeconds(2)))).isEmpty();
+		assertThat(mappingReader.findAllActive(deadline(Duration.ofSeconds(2))).mappings()).isEmpty();
 		assertPoolIdle();
 	}
 
@@ -205,10 +208,58 @@ class CatalogReadTimeoutIntegrationTests {
 			observingRepository, Duration.ofMillis(150), Duration.ofMillis(100)
 		);
 
-		assertThat(reader.findAllActive(deadline(Duration.ofSeconds(2)))).isEmpty();
+		assertThat(reader.findAllActive(deadline(Duration.ofSeconds(2))).mappings()).isEmpty();
 
 		assertThat(settings()).isEqualTo(baseline);
 		assertPoolIdle();
+	}
+
+	@Test
+	void reappliesRemainingSqlBudgetBeforeReadingReadiness() {
+		AtomicLong mappingBudget = new AtomicLong();
+		AtomicLong readinessBudget = new AtomicLong();
+		RoomTypeRepository mappingStage = mock(RoomTypeRepository.class);
+		CatalogSyncStateRepository readinessStage = mock(CatalogSyncStateRepository.class);
+		when(mappingStage.findAllActiveMappingsForSearch()).thenAnswer(invocation -> {
+			mappingBudget.set(statementBudgetMillis());
+			Thread.sleep(180);
+			return roomTypeRepository.findAllActiveMappingsForSearch();
+		});
+		when(readinessStage.findInitializedSuppliers()).thenAnswer(invocation -> {
+			readinessBudget.set(statementBudgetMillis());
+			return syncStateRepository.findInitializedSuppliers();
+		});
+		var reader = new JpaActiveCatalogMappingReader(mappingStage, readinessStage, jdbcTemplate,
+			transactionManager, new CatalogDatabaseProperties(Duration.ofSeconds(2), Duration.ofMillis(300)));
+
+		reader.findAllActive(deadline(Duration.ofSeconds(1)));
+
+		assertThat(readinessBudget.get()).isPositive().isLessThan(mappingBudget.get() - 100);
+		assertPoolIdle();
+	}
+
+	@Test
+	void readinessTableLockTimesOutAndRecoversWithoutLeakingSettings() throws Exception {
+		List<String> baseline = settings();
+		try (Connection blocker = independentConnection()) {
+			blocker.setAutoCommit(false);
+			try (var statement = blocker.createStatement()) {
+				statement.execute("lock table supplier_catalog_state in access exclusive mode");
+			}
+			assertThatThrownBy(() -> mappingReader.findAllActive(deadline(Duration.ofSeconds(2))))
+				.isInstanceOfSatisfying(CatalogReadException.class,
+					failure -> assertThat(failure.reason()).isEqualTo(Reason.TIMEOUT));
+			assertPoolIdle();
+			blocker.rollback();
+		}
+		assertThat(mappingReader.findAllActive(deadline(Duration.ofSeconds(2))).mappings()).isEmpty();
+		assertThat(settings()).isEqualTo(baseline);
+		assertPoolIdle();
+	}
+
+	private long statementBudgetMillis() {
+		return jdbcTemplate.queryForObject(
+			"select setting::bigint from pg_settings where name = 'statement_timeout'", Long.class);
 	}
 
 	@Test
@@ -238,7 +289,7 @@ class CatalogReadTimeoutIntegrationTests {
 		RoomTypeRepository repository, Duration statementTimeout, Duration lockTimeout
 	) {
 		return new JpaActiveCatalogMappingReader(
-			repository, jdbcTemplate, transactionManager,
+			repository, syncStateRepository, jdbcTemplate, transactionManager,
 			new CatalogDatabaseProperties(statementTimeout, lockTimeout)
 		);
 	}

@@ -24,6 +24,7 @@ import reactor.core.publisher.Mono;
 
 import com.supplierhub.catalog.application.ActiveCatalogMapping;
 import com.supplierhub.catalog.application.ActiveCatalogMappingReader;
+import com.supplierhub.catalog.application.ActiveCatalogSnapshot;
 import com.supplierhub.catalog.application.CatalogReadException;
 import com.supplierhub.catalog.domain.Supplier;
 import com.supplierhub.search.domain.Offer;
@@ -103,9 +104,9 @@ public class IntegratedSearchService {
 	}
 
 	private IntegratedSearchResult search(SearchCriteria criteria, long startedAt) {
-		List<ActiveCatalogMapping> rows;
+		ActiveCatalogSnapshot catalog;
 		try {
-			rows = metrics.stage("DATABASE", () -> mappingReader.findAllActive(
+			catalog = metrics.stage("DATABASE", () -> mappingReader.findAllActive(
 				startedAt + overallTimeout.toNanos()
 			));
 		} catch (CatalogReadException exception) {
@@ -118,12 +119,13 @@ public class IntegratedSearchService {
 				))
 				.toList());
 		}
+		List<ActiveCatalogMapping> rows = catalog.mappings();
 		Map<Supplier, List<PropertyMapping>> mappings = metrics.stage("MAPPING", () -> groupMappings(rows));
 		List<SupplierSearchPlan> plans = clients.stream()
-			.map(client -> plan(client, criteria, mappings.getOrDefault(
-				client.supplier(),
-				List.of()
-			)))
+			.map(client -> new SupplierSearchPlan(
+				client, criteria, mappings.getOrDefault(client.supplier(), List.of()),
+				catalog.initializedSuppliers().contains(client.supplier())
+			))
 			.toList();
 
 		Duration remainingTimeout = remainingTimeout(startedAt);
@@ -264,14 +266,6 @@ public class IntegratedSearchService {
 		);
 	}
 
-	private SupplierSearchPlan plan(
-		SupplierSearchClient client,
-		SearchCriteria criteria,
-		List<PropertyMapping> mappings
-	) {
-		return new SupplierSearchPlan(client, criteria, mappings);
-	}
-
 	private SupplierSearchAggregate aggregate(
 		SupplierSearchPlan plan,
 		List<BatchSearchOutcome> allCompleted
@@ -279,11 +273,11 @@ public class IntegratedSearchService {
 		if (plan.batchCount() == 0) {
 			return new SupplierSearchAggregate(
 				plan.client().supplier(),
-				SupplierSearchStatus.FAILED,
+				plan.catalogInitialized() ? SupplierSearchStatus.SUCCESS : SupplierSearchStatus.FAILED,
 				List.of(),
 				0,
 				0,
-				List.of(SupplierFailureType.CATALOG_UNAVAILABLE)
+				plan.catalogInitialized() ? List.of() : List.of(SupplierFailureType.CATALOG_UNAVAILABLE)
 			);
 		}
 
@@ -458,7 +452,8 @@ public class IntegratedSearchService {
 	private record SupplierSearchPlan(
 		SupplierSearchClient client,
 		SearchCriteria criteria,
-		List<PropertyMapping> mappings
+		List<PropertyMapping> mappings,
+		boolean catalogInitialized
 	) {
 
 		private int batchCount() {

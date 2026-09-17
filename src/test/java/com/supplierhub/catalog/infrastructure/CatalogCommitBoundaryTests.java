@@ -4,6 +4,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assertions.catchThrowable;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 import static org.mockito.Mockito.verify;
 
 import java.sql.SQLException;
@@ -17,6 +19,7 @@ import jakarta.persistence.EntityManagerFactory;
 
 import org.hibernate.SessionFactory;
 import org.hibernate.stat.Statistics;
+import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -33,6 +36,7 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.postgresql.PostgreSQLContainer;
 
 import com.supplierhub.catalog.application.ActiveCatalogMapping;
+import com.supplierhub.catalog.application.ActiveCatalogMappingReader;
 import com.supplierhub.catalog.application.CatalogSnapshotStore;
 import com.supplierhub.catalog.application.CatalogSynchronizationService;
 import com.supplierhub.catalog.domain.CatalogSnapshot;
@@ -66,6 +70,12 @@ class CatalogCommitBoundaryTests {
 	private RoomTypeRepository roomTypeRepository;
 
 	@Autowired
+	private CatalogSyncStateRepository syncStateRepository;
+
+	@Autowired
+	private ActiveCatalogMappingReader mappingReader;
+
+	@Autowired
 	private PlatformTransactionManager transactionManager;
 
 	@Autowired
@@ -90,6 +100,77 @@ class CatalogCommitBoundaryTests {
 	void clearCommittedCatalog() {
 		jdbcTemplate.update("delete from supplier_room_type");
 		jdbcTemplate.update("delete from supplier_property");
+		jdbcTemplate.update("delete from supplier_catalog_state");
+	}
+
+	@Test
+	void commitsEmptyCatalogReadinessWithoutCreatingMappings() {
+		assertThat(mappingReader.findAllActive(deadline()).initializedSuppliers()).isEmpty();
+
+		snapshotStore.replace(snapshot(Supplier.SUPPLIER_A));
+		snapshotStore.replace(snapshot(Supplier.SUPPLIER_A));
+
+		var result = mappingReader.findAllActive(deadline());
+		assertThat(result.initializedSuppliers()).containsExactly(Supplier.SUPPLIER_A);
+		assertThat(result.mappings()).isEmpty();
+		assertThat(syncStateRepository.count()).isEqualTo(1);
+	}
+
+	@Test
+	void rollsBackReadinessTogetherWithFirstCatalogMappings() {
+		transaction().executeWithoutResult(status -> {
+			snapshotStore.replace(snapshot(Supplier.SUPPLIER_A, catalogProperty("P1", "New", "Room")));
+			assertThat(syncStateRepository.findInitializedSuppliers()).containsExactly(Supplier.SUPPLIER_A);
+			status.setRollbackOnly();
+		});
+
+		var result = mappingReader.findAllActive(deadline());
+		assertThat(result.initializedSuppliers()).isEmpty();
+		assertThat(result.mappings()).isEmpty();
+	}
+
+	@Test
+	void readsMappingsAndReadinessFromSameSnapshotDuringFirstCommit() throws Exception {
+		RoomTypeRepository observingRepository = mock(RoomTypeRepository.class);
+		try (var executor = Executors.newSingleThreadExecutor()) {
+			when(observingRepository.findAllActiveMappingsForSearch()).thenAnswer(invocation -> {
+				var rows = roomTypeRepository.findAllActiveMappingsForSearch();
+				executor.submit(() -> snapshotStore.replace(snapshot(Supplier.SUPPLIER_A,
+					catalogProperty("P1", "Committed during read", "Room")))).get(5, TimeUnit.SECONDS);
+				return rows;
+			});
+			var reader = new JpaActiveCatalogMappingReader(observingRepository, syncStateRepository,
+				jdbcTemplate, transactionManager,
+				new CatalogDatabaseProperties(Duration.ofSeconds(2), Duration.ofMillis(300)));
+
+			var beforeCommit = reader.findAllActive(deadline());
+			assertThat(beforeCommit.mappings()).isEmpty();
+			assertThat(beforeCommit.initializedSuppliers()).isEmpty();
+		}
+
+		var afterCommit = mappingReader.findAllActive(deadline());
+		assertThat(afterCommit.mappings()).hasSize(1);
+		assertThat(afterCommit.initializedSuppliers()).containsExactly(Supplier.SUPPLIER_A);
+	}
+
+	@Test
+	void migrationBackfillsExistingSupplierWithoutChangingItsIds() {
+		String schema = "catalog_v2_upgrade";
+		try {
+			Flyway.configure().dataSource(postgres.getJdbcUrl(), postgres.getUsername(), postgres.getPassword())
+				.schemas(schema).defaultSchema(schema).target("2").load().migrate();
+			jdbcTemplate.update("insert into " + schema + ".supplier_property"
+				+ " (id, supplier, supplier_property_code, name, active) values (42, 'SUPPLIER_A', 'P1', 'Legacy', false)");
+			Flyway.configure().dataSource(postgres.getJdbcUrl(), postgres.getUsername(), postgres.getPassword())
+				.schemas(schema).defaultSchema(schema).load().migrate();
+
+			assertThat(jdbcTemplate.queryForList("select supplier from " + schema + ".supplier_catalog_state", String.class))
+				.containsExactly("SUPPLIER_A");
+			assertThat(jdbcTemplate.queryForObject("select id from " + schema + ".supplier_property", Long.class))
+				.isEqualTo(42L);
+		} finally {
+			jdbcTemplate.execute("drop schema if exists " + schema + " cascade");
+		}
 	}
 
 	@Test
@@ -346,6 +427,10 @@ class CatalogCommitBoundaryTests {
 		assertThat(storedMapping(Supplier.SUPPLIER_A, "P2").propertyName())
 			.isEqualTo("New");
 		assertThat(dataSource.getHikariPoolMXBean().getActiveConnections()).isZero();
+	}
+
+	private long deadline() {
+		return System.nanoTime() + Duration.ofSeconds(5).toNanos();
 	}
 
 	private TransactionTemplate transaction() {

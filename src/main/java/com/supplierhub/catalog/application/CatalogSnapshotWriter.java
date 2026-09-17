@@ -17,6 +17,7 @@ import com.supplierhub.catalog.domain.CatalogSnapshot.CatalogRoomType;
 import com.supplierhub.catalog.domain.Property;
 import com.supplierhub.catalog.domain.RoomType;
 import com.supplierhub.catalog.infrastructure.PropertyRepository;
+import com.supplierhub.catalog.infrastructure.CatalogSyncStateRepository;
 import com.supplierhub.catalog.infrastructure.RoomTypeRepository;
 import com.supplierhub.supplier.common.SupplierIntegrationProperties;
 
@@ -27,16 +28,19 @@ public class CatalogSnapshotWriter implements CatalogSnapshotStore {
 
 	private final PropertyRepository propertyRepository;
 	private final RoomTypeRepository roomTypeRepository;
+	private final CatalogSyncStateRepository syncStateRepository;
 	private final int bulkMissingMinimumCount;
 	private final double maximumMissingRatio;
 
 	public CatalogSnapshotWriter(
 		PropertyRepository propertyRepository,
 		RoomTypeRepository roomTypeRepository,
+		CatalogSyncStateRepository syncStateRepository,
 		SupplierIntegrationProperties properties
 	) {
 		this.propertyRepository = propertyRepository;
 		this.roomTypeRepository = roomTypeRepository;
+		this.syncStateRepository = syncStateRepository;
 		this.bulkMissingMinimumCount = properties.catalog()
 			.bulkMissingMinimumCount();
 		this.maximumMissingRatio = properties.catalog().maximumMissingRatio();
@@ -111,6 +115,8 @@ public class CatalogSnapshotWriter implements CatalogSnapshotStore {
 			}
 		}
 
+		// 빈 snapshot도 준비 완료다. 이후 flush/commit 실패 시 이 기록도 함께 rollback된다.
+		syncStateRepository.markInitialized(snapshot.supplier().name());
 		return changes.toUpdate(snapshot);
 	}
 

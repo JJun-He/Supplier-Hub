@@ -7,6 +7,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.awaitility.Awaitility.await;
 
 import com.supplierhub.catalog.application.ActiveCatalogMapping;
+import com.supplierhub.catalog.application.ActiveCatalogSnapshot;
 import com.supplierhub.catalog.domain.Supplier;
 import com.supplierhub.search.application.IntegratedSearchService;
 import com.supplierhub.search.application.SearchStatus;
@@ -379,12 +380,13 @@ class SupplierResourceIntegrationTests {
 
 	private IntegratedSearchService service(Duration timeout) {
 		return new IntegratedSearchService(
-				deadlineNanos ->
+				deadlineNanos -> new ActiveCatalogSnapshot(
 						List.of(
 								new ActiveCatalogMapping(
 										1, Supplier.SUPPLIER_A, "P0", "One", 1, "R0", "Room"),
 								new ActiveCatalogMapping(
 										2, Supplier.SUPPLIER_B, "P0", "Two", 2, "R0", "Room")),
+						java.util.Set.of(Supplier.SUPPLIER_A, Supplier.SUPPLIER_B)),
 				List.of(a, b),
 				properties(timeout),
 				fixture.resources,
