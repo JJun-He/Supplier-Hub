@@ -14,6 +14,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.UUID;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -30,6 +31,7 @@ import com.supplierhub.catalog.domain.Supplier;
 import com.supplierhub.search.domain.Offer;
 import com.supplierhub.search.domain.SearchCriteria;
 import com.supplierhub.supplier.common.SupplierCallResources;
+import com.supplierhub.supplier.common.SearchCallContext;
 import com.supplierhub.supplier.common.SupplierFailureType;
 import com.supplierhub.supplier.common.SupplierIntegrationException;
 import com.supplierhub.supplier.common.SupplierIntegrationProperties;
@@ -104,6 +106,7 @@ public class IntegratedSearchService {
 	}
 
 	private IntegratedSearchResult search(SearchCriteria criteria, long startedAt) {
+		String searchId = UUID.randomUUID().toString();
 		ActiveCatalogSnapshot catalog;
 		try {
 			catalog = metrics.stage("DATABASE", () -> mappingReader.findAllActive(
@@ -111,7 +114,7 @@ public class IntegratedSearchService {
 			));
 		} catch (CatalogReadException exception) {
 			metrics.catalogReadFailed(exception.reason().name());
-			log.warn("Active catalog read failed: reason={}", exception.reason(), exception);
+			log.warn("Active catalog read failed: searchId={}, reason={}", searchId, exception.reason(), exception);
 			return new IntegratedSearchResult(SearchStatus.FAILED, clients.stream()
 				.map(client -> new SupplierSearchOutcome(
 					client.supplier(), SupplierSearchStatus.FAILED, List.of(), 0, 0,
@@ -134,7 +137,7 @@ public class IntegratedSearchService {
 			? List.of()
 			: Flux.fromIterable(plans)
 				.filter(plan -> plan.batchCount() > 0)
-				.flatMap(this::execute, clients.size())
+				.flatMap(plan -> execute(plan, searchId), clients.size())
 				.take(remainingTimeout)
 				.collectList()
 				.block());
@@ -143,7 +146,7 @@ public class IntegratedSearchService {
 			: completed;
 		return metrics.stage("ASSEMBLY", () -> {
 			List<SupplierSearchAggregate> aggregates = plans.stream()
-				.map(plan -> aggregate(plan, safeCompleted))
+				.map(plan -> aggregate(plan, safeCompleted, searchId))
 				.toList();
 			List<SupplierSearchOutcome> supplierResults = enrichOutcomes(
 				aggregates,
@@ -155,7 +158,8 @@ public class IntegratedSearchService {
 				supplierResults
 			);
 			log.info(
-				"Integrated Supplier search completed: status={}, acceptedOffers={}, elapsedMillis={}",
+				"Integrated Supplier search completed: searchId={}, status={}, acceptedOffers={}, elapsedMillis={}",
+				searchId,
 				result.status(),
 				result.supplierResults().stream().mapToInt(SupplierSearchOutcome::acceptedOfferCount).sum(),
 				Duration.ofNanos(System.nanoTime() - startedAt).toMillis()
@@ -213,18 +217,20 @@ public class IntegratedSearchService {
 		);
 	}
 
-	private Flux<BatchSearchOutcome> execute(SupplierSearchPlan plan) {
+	private Flux<BatchSearchOutcome> execute(SupplierSearchPlan plan, String searchId) {
 		return Flux.range(0, plan.batchCount())
 			.map(plan::request)
 			.flatMap(indexedRequest -> executeBatch(
 				plan.client(),
-				indexedRequest
+				indexedRequest,
+				searchId
 			), maxConcurrency);
 	}
 
 	private Mono<BatchSearchOutcome> executeBatch(
 		SupplierSearchClient client,
-		IndexedRequest indexedRequest
+		IndexedRequest indexedRequest,
+		String searchId
 	) {
 		return resources.execute(client.supplier(), SupplierOperation.SEARCH,
 			() -> Mono.defer(() -> client.search(indexedRequest.request()))
@@ -237,14 +243,17 @@ public class IntegratedSearchService {
 					throw invalidResponse(client.supplier(), "Supplier search result did not match the requested supplier");
 				}
 			}))
-			.map(result -> successfulBatch(client, indexedRequest, result))
+			.contextWrite(context -> context.put(
+				SearchCallContext.class, new SearchCallContext(searchId, indexedRequest.index())
+			))
+			.map(result -> BatchSearchOutcome.succeeded(client.supplier(), indexedRequest.index(), result))
 			.onErrorResume(cause -> {
 				SupplierFailureType failureType = failureType(cause);
 				var event = failureType == SupplierFailureType.INTERNAL_ERROR
 					? log.atError() : log.atWarn();
 				event.setCause(cause).log(
-					"Supplier search batch failed: supplier={}, batch={}, failureType={}",
-					client.supplier(), indexedRequest.index(), failureType
+					"Supplier search batch failed: searchId={}, supplier={}, batch={}, failureType={}",
+					searchId, client.supplier(), indexedRequest.index(), failureType
 				);
 				return Mono.just(BatchSearchOutcome.failed(
 					client.supplier(),
@@ -254,21 +263,10 @@ public class IntegratedSearchService {
 			});
 	}
 
-	private BatchSearchOutcome successfulBatch(
-		SupplierSearchClient client,
-		IndexedRequest indexedRequest,
-		SupplierSearchResult result
-	) {
-		return BatchSearchOutcome.succeeded(
-			client.supplier(),
-			indexedRequest.index(),
-			result
-		);
-	}
-
 	private SupplierSearchAggregate aggregate(
 		SupplierSearchPlan plan,
-		List<BatchSearchOutcome> allCompleted
+		List<BatchSearchOutcome> allCompleted,
+		String searchId
 	) {
 		if (plan.batchCount() == 0) {
 			return new SupplierSearchAggregate(
@@ -309,7 +307,8 @@ public class IntegratedSearchService {
 		if (timedOutBatchCount > 0) {
 			failureTypes.add(SupplierFailureType.TIMEOUT);
 			log.warn(
-				"Supplier search exceeded overall timeout: supplier={}, timedOutBatches={}",
+				"Supplier search exceeded overall timeout: searchId={}, supplier={}, timedOutBatches={}",
+				searchId,
 				plan.client().supplier(),
 				timedOutBatchCount
 			);

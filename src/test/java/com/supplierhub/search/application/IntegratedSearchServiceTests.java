@@ -32,6 +32,7 @@ import com.supplierhub.catalog.domain.Supplier;
 import com.supplierhub.supplier.common.SupplierResourceFixture;
 import com.supplierhub.catalog.application.ActiveCatalogMapping;
 import com.supplierhub.catalog.application.ActiveCatalogSnapshot;
+import com.supplierhub.supplier.common.SearchCallContext;
 import com.supplierhub.catalog.application.ActiveCatalogMappingReader;
 import com.supplierhub.catalog.application.CatalogReadException;
 import com.supplierhub.search.domain.DailyInventory;
@@ -287,6 +288,27 @@ class IntegratedSearchServiceTests {
 		assertThat(result.status()).isEqualTo(SearchStatus.COMPLETE);
 		assertThat(result.offers()).containsExactly(offer);
 		verify(empty, never()).search(org.mockito.ArgumentMatchers.any());
+	}
+
+	@Test
+	void carriesDistinctSearchAndBatchContextAcrossAsyncCalls() {
+		when(mappingReader.findAllActive(anyLong())).thenReturn(catalog(mappings(Supplier.SUPPLIER_A, 51, 1)));
+		List<SearchCallContext> contexts = new CopyOnWriteArrayList<>();
+		var source = client(Supplier.SUPPLIER_A, request -> Mono.delay(Duration.ofMillis(5))
+			.flatMap(ignored -> Mono.deferContextual(context -> {
+				contexts.add(context.get(SearchCallContext.class));
+				return Mono.just(success(request.supplier()));
+			})));
+		var service = service(List.of(source), Duration.ofSeconds(1), 4);
+
+		service.search(CRITERIA);
+		service.search(CRITERIA);
+
+		assertThat(contexts).hasSize(4);
+		assertThat(contexts.subList(0, 2)).extracting(SearchCallContext::searchId).containsOnly(contexts.getFirst().searchId());
+		assertThat(contexts.subList(0, 2)).extracting(SearchCallContext::batchIndex).containsExactlyInAnyOrder(0, 1);
+		assertThat(contexts.subList(2, 4)).extracting(SearchCallContext::searchId).containsOnly(contexts.get(2).searchId());
+		assertThat(contexts.getFirst().searchId()).isNotBlank().isNotEqualTo(contexts.get(2).searchId());
 	}
 
 	@Test

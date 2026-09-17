@@ -4,7 +4,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.time.LocalDate;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.function.Function;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -18,6 +20,8 @@ import com.supplierhub.search.domain.NightlyPrice;
 import com.supplierhub.search.domain.OfferCandidate;
 import com.supplierhub.search.domain.Price;
 import com.supplierhub.search.domain.SearchCriteria;
+import com.supplierhub.shared.InvalidValueException;
+import com.supplierhub.supplier.common.SearchCallContext;
 
 @ExtendWith(OutputCaptureExtension.class)
 class OfferNormalizerTests {
@@ -166,6 +170,51 @@ class OfferNormalizerTests {
 
 		assertThat(result.offers()).isEmpty();
 		assertThat(result.rejectedOfferCount()).isEqualTo(1);
+	}
+
+	@Test
+	void capacityConflictsShareTheFiveSampleLimitAndKeepExistingCounts(CapturedOutput output) {
+		List<OfferCandidate> candidates = new ArrayList<>();
+		for (int capacity = 2; capacity < 10; capacity++) {
+			candidates.add(candidate(capacity, totalPrice(), 3, 1, 5));
+		}
+		candidates.add(candidates.getFirst());
+
+		OfferNormalizationResult result = OfferNormalizer.normalize(
+			CRITERIA, Supplier.SUPPLIER_B, candidates, Function.identity(),
+			new SearchCallContext("capacity-search", 3),
+			ignored -> new OfferSourceReference("B-property", "B-room")
+		);
+
+		assertThat(result.offers()).isEmpty();
+		assertThat(result.rejectedOfferCount()).isEqualTo(8);
+		assertThat(result.duplicateOfferCount()).isEqualTo(1);
+		assertThat(output.getOut().lines().filter(line -> line.contains("Supplier offer candidate rejected")))
+			.hasSize(5);
+		assertThat(output.getOut().lines().filter(line -> line.contains("Supplier offer rejection summary")))
+			.hasSize(1);
+		assertThat(output).contains("conflicting room capacities", "searchId=capacity-search", "batchIndex=3",
+			"supplierPropertyCode=B-property", "supplierRoomTypeCode=B-room", "rejectedOfferCount=8",
+			"sampledCount=5", "omittedCount=3");
+	}
+
+	@Test
+	void boundsCauseContextAndOmitsStackTraces(CapturedOutput output) {
+		String unsafeReason = "bad value\n\r\t\u001b\u2028\u2029" + "x".repeat(500);
+
+		OfferNormalizationResult result = OfferNormalizer.normalize(
+			CRITERIA, Supplier.SUPPLIER_B, List.of("item"), ignored -> {
+				throw new OfferMappingException(new InvalidValueException(unsafeReason));
+			}, new SearchCallContext("safe-reason", 0), ignored -> OfferSourceReference.unknown()
+		);
+
+		assertThat(result.rejectedOfferCount()).isEqualTo(1);
+		String rejection = output.getOut().lines()
+			.filter(line -> line.contains("Supplier offer candidate rejected")).findFirst().orElseThrow();
+		String reason = rejection.substring(rejection.indexOf("reason=") + "reason=".length());
+		assertThat(reason).hasSize(240).startsWith("bad value      ").endsWith("...")
+			.doesNotContain("\n", "\r", "\t", "\u001b", "\u2028", "\u2029");
+		assertThat(output).doesNotContain("at com.supplierhub", "Caused by:");
 	}
 
 	private OfferCandidate candidate(

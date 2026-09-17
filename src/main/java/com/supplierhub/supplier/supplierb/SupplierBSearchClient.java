@@ -23,10 +23,12 @@ import com.supplierhub.catalog.domain.Supplier;
 import com.supplierhub.search.application.OfferMappingException;
 import com.supplierhub.search.application.OfferNormalizationResult;
 import com.supplierhub.search.application.OfferNormalizer;
+import com.supplierhub.search.application.OfferSourceReference;
 import com.supplierhub.search.domain.DailyInventory;
 import com.supplierhub.search.domain.Money;
 import com.supplierhub.search.domain.OfferCandidate;
 import com.supplierhub.search.domain.Price;
+import com.supplierhub.supplier.common.SearchCallContext;
 import com.supplierhub.supplier.common.SupplierFailureType;
 import com.supplierhub.supplier.common.SupplierHttpFailureMapper;
 import com.supplierhub.supplier.common.SupplierIntegrationException;
@@ -67,67 +69,71 @@ public class SupplierBSearchClient implements SupplierSearchClient {
 			.map(PropertyMapping::supplierPropertyCode)
 			.collect(Collectors.joining(","));
 
-		return webClient.get()
-			.uri(uriBuilder -> uriBuilder
-				.path("/b/api/search")
-				.queryParam("propertyIds", "{codes}")
-				.queryParam("checkIn", request.criteria().checkIn())
-				.queryParam("checkOut", request.criteria().checkOut())
-				.queryParam("adults", request.criteria().adults())
-				.queryParam("children", request.criteria().children())
-				.build(Map.of("codes", propertyIds)))
-			.retrieve()
-			.onStatus(HttpStatusCode::isError, this::httpFailure)
-			.bodyToMono(JsonNode.class)
-			.switchIfEmpty(Mono.error(invalidResponse()))
-			.map(response -> normalize(response, request, mappings))
-			.timeout(properties.search().callTimeout())
-			.onErrorMap(
-				cause -> !(cause instanceof SupplierIntegrationException)
-					&& SupplierTransportFailureMapper.isResourceFailure(cause),
-				cause -> SupplierTransportFailureMapper.resourceFailure(
-					supplier(), "Supplier request", cause
+		return Mono.deferContextual(contextView -> {
+			SearchCallContext context = SearchCallContext.from(contextView);
+			return webClient.get()
+				.uri(uriBuilder -> uriBuilder
+					.path("/b/api/search")
+					.queryParam("propertyIds", "{codes}")
+					.queryParam("checkIn", request.criteria().checkIn())
+					.queryParam("checkOut", request.criteria().checkOut())
+					.queryParam("adults", request.criteria().adults())
+					.queryParam("children", request.criteria().children())
+					.build(Map.of("codes", propertyIds)))
+				.retrieve()
+				.onStatus(HttpStatusCode::isError, this::httpFailure)
+				.bodyToMono(JsonNode.class)
+				.switchIfEmpty(Mono.error(invalidResponse()))
+				.map(response -> normalize(response, request, mappings, context))
+				.timeout(properties.search().callTimeout())
+				.onErrorMap(
+					cause -> !(cause instanceof SupplierIntegrationException)
+						&& SupplierTransportFailureMapper.isResourceFailure(cause),
+					cause -> SupplierTransportFailureMapper.resourceFailure(
+						supplier(), "Supplier request", cause
+					)
 				)
-			)
-			.onErrorMap(
-				cause -> !(cause instanceof SupplierIntegrationException)
-					&& SupplierTransportFailureMapper.isTimeout(cause),
-				cause -> SupplierTransportFailureMapper.timeoutFailure(
-					supplier(),
-					"Supplier B search request",
-					cause
+				.onErrorMap(
+					cause -> !(cause instanceof SupplierIntegrationException)
+						&& SupplierTransportFailureMapper.isTimeout(cause),
+					cause -> SupplierTransportFailureMapper.timeoutFailure(
+						supplier(),
+						"Supplier B search request",
+						cause
+					)
 				)
-			)
-			.onErrorMap(
-				WebClientRequestException.class,
-				cause -> SupplierTransportFailureMapper.requestFailure(
-					supplier(),
-					"Supplier B search request",
-					cause
+				.onErrorMap(
+					WebClientRequestException.class,
+					cause -> SupplierTransportFailureMapper.requestFailure(
+						supplier(),
+						"Supplier B search request",
+						cause
+					)
 				)
-			)
-			.onErrorMap(
-				WebClientResponseException.class,
-				cause -> SupplierTransportFailureMapper.responseFailure(
-					supplier(), "Supplier B search request", cause
+				.onErrorMap(
+					WebClientResponseException.class,
+					cause -> SupplierTransportFailureMapper.responseFailure(
+						supplier(), "Supplier B search request", cause
+					)
 				)
-			)
-			.onErrorMap(
-				DecodingException.class,
-				cause -> new SupplierIntegrationException(
-					supplier(),
-					SupplierFailureType.INVALID_RESPONSE,
-					false,
-					"Supplier B search response was invalid",
-					cause
-				)
-			);
+				.onErrorMap(
+					DecodingException.class,
+					cause -> new SupplierIntegrationException(
+						supplier(),
+						SupplierFailureType.INVALID_RESPONSE,
+						false,
+						"Supplier B search response was invalid",
+						cause
+					)
+				);
+		});
 	}
 
 	private SupplierSearchResult normalize(
 		JsonNode response,
 		SupplierSearchRequest request,
-		Map<SupplierItemKey, InternalMapping> mappings
+		Map<SupplierItemKey, InternalMapping> mappings,
+		SearchCallContext context
 	) {
 		List<JsonNode> items;
 		try {
@@ -146,7 +152,12 @@ public class SupplierBSearchClient implements SupplierSearchClient {
 			request.criteria(),
 			supplier(),
 			items,
-			item -> toCandidate(item, mappings)
+			item -> toCandidate(item, mappings),
+			context,
+			item -> new OfferSourceReference(
+				optionalText(item, "propertyId"),
+				optionalText(item, "roomId")
+			)
 		);
 		return new SupplierSearchResult(
 			supplier(),
@@ -181,6 +192,11 @@ public class SupplierBSearchClient implements SupplierSearchClient {
 		} catch (InvalidValueException exception) {
 			throw new OfferMappingException(exception);
 		}
+	}
+
+	private static String optionalText(JsonNode item, String field) {
+		JsonNode value = item == null || !item.isObject() ? null : item.get(field);
+		return value != null && value.isString() ? value.asString() : null;
 	}
 
 	private Map<SupplierItemKey, InternalMapping> mappings(

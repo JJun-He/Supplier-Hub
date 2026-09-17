@@ -2,7 +2,7 @@ package com.supplierhub.search.application;
 
 import java.util.HashMap;
 import java.util.HashSet;
-import java.util.LinkedHashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -18,6 +18,7 @@ import com.supplierhub.catalog.domain.Supplier;
 import com.supplierhub.search.domain.Offer;
 import com.supplierhub.search.domain.OfferCandidate;
 import com.supplierhub.search.domain.SearchCriteria;
+import com.supplierhub.supplier.common.SearchCallContext;
 
 public final class OfferNormalizer {
 
@@ -37,7 +38,9 @@ public final class OfferNormalizer {
 			criteria,
 			sourceSupplier,
 			candidates,
-			Function.identity()
+			Function.identity(),
+			SearchCallContext.direct(),
+			ignored -> OfferSourceReference.unknown()
 		);
 	}
 
@@ -47,26 +50,43 @@ public final class OfferNormalizer {
 		List<T> sourceItems,
 		Function<? super T, OfferCandidate> candidateMapper
 	) {
-		Objects.requireNonNull(sourceSupplier, "sourceSupplier must not be null");
 		return normalizeItems(
 			criteria,
 			sourceSupplier,
 			sourceItems,
-			candidateMapper
+			candidateMapper,
+			SearchCallContext.direct(),
+			ignored -> OfferSourceReference.unknown()
 		);
+	}
+
+	public static <T> OfferNormalizationResult normalize(
+		SearchCriteria criteria,
+		Supplier sourceSupplier,
+		List<T> sourceItems,
+		Function<? super T, OfferCandidate> candidateMapper,
+		SearchCallContext context,
+		Function<? super T, OfferSourceReference> referenceMapper
+	) {
+		return normalizeItems(criteria, sourceSupplier, sourceItems, candidateMapper, context, referenceMapper);
 	}
 
 	private static <T> OfferNormalizationResult normalizeItems(
 		SearchCriteria criteria,
 		Supplier sourceSupplier,
 		List<T> sourceItems,
-		Function<? super T, OfferCandidate> candidateMapper
+		Function<? super T, OfferCandidate> candidateMapper,
+		SearchCallContext context,
+		Function<? super T, OfferSourceReference> referenceMapper
 	) {
 		Objects.requireNonNull(criteria, "criteria must not be null");
 		Objects.requireNonNull(sourceSupplier, "sourceSupplier must not be null");
 		Objects.requireNonNull(sourceItems, "sourceItems must not be null");
 		Objects.requireNonNull(candidateMapper, "candidateMapper must not be null");
-		Set<Offer> offers = new LinkedHashSet<>();
+		Objects.requireNonNull(context, "context must not be null");
+		Objects.requireNonNull(referenceMapper, "referenceMapper must not be null");
+		Map<Offer, Integer> offers = new LinkedHashMap<>();
+		RejectionLog<T> rejectionLog = new RejectionLog<>(sourceSupplier, context, sourceItems, referenceMapper);
 		int rejectedOfferCount = 0;
 		int unavailableOfferCount = 0;
 		int duplicateOfferCount = 0;
@@ -79,7 +99,7 @@ public final class OfferNormalizer {
 				);
 			} catch (OfferMappingException exception) {
 				rejectedOfferCount++;
-				logRejection(index, sourceSupplier, null, exception);
+				rejectionLog.rejected(index, null, exception);
 				continue;
 			}
 			try {
@@ -90,7 +110,7 @@ public final class OfferNormalizer {
 				}
 				Optional<Offer> offer = normalize(criteria, candidate);
 				if (offer.isPresent()) {
-					if (!offers.add(offer.orElseThrow())) {
+					if (offers.putIfAbsent(offer.orElseThrow(), index) != null) {
 						duplicateOfferCount++;
 					}
 				} else {
@@ -98,38 +118,40 @@ public final class OfferNormalizer {
 				}
 			} catch (InvalidValueException exception) {
 				rejectedOfferCount++;
-				logRejection(index, sourceSupplier, candidate, exception);
+				rejectionLog.rejected(index, candidate, exception);
 			}
 		}
 
-		rejectedOfferCount += rejectConflictingRoomCapacities(offers, sourceSupplier);
+		rejectedOfferCount += rejectConflictingRoomCapacities(offers, rejectionLog);
+		rejectionLog.summary(rejectedOfferCount);
 		return new OfferNormalizationResult(
-			List.copyOf(offers),
+			List.copyOf(offers.keySet()),
 			rejectedOfferCount,
 			unavailableOfferCount,
 			duplicateOfferCount
 		);
 	}
 
-	private static int rejectConflictingRoomCapacities(Set<Offer> offers, Supplier supplier) {
+	private static int rejectConflictingRoomCapacities(Map<Offer, Integer> offers, RejectionLog<?> rejectionLog) {
 		Map<Long, Integer> capacities = new HashMap<>();
 		Set<Long> conflictingRoomIds = new HashSet<>();
-		for (Offer offer : offers) {
+		for (Offer offer : offers.keySet()) {
 			Integer previous = capacities.putIfAbsent(offer.roomTypeId(), offer.maxOccupancy());
 			if (previous != null && previous != offer.maxOccupancy()) {
 				conflictingRoomIds.add(offer.roomTypeId());
 			}
 		}
 		int before = offers.size();
-		offers.removeIf(offer -> conflictingRoomIds.contains(offer.roomTypeId()));
-		int rejected = before - offers.size();
-		if (rejected > 0) {
-			log.warn(
-				"Supplier offers rejected due to conflicting room capacities: sourceSupplier={}, roomCount={}, offerCount={}",
-				supplier, conflictingRoomIds.size(), rejected
-			);
-		}
-		return rejected;
+		offers.entrySet().removeIf(entry -> {
+			Offer offer = entry.getKey();
+			if (!conflictingRoomIds.contains(offer.roomTypeId())) {
+				return false;
+			}
+			rejectionLog.rejected(entry.getValue(), offer.supplier(), offer.propertyId(), offer.roomTypeId(),
+				"InvalidValueException", "conflicting room capacities for the same room type");
+			return true;
+		});
+		return before - offers.size();
 	}
 
 	private static Optional<Offer> normalize(
@@ -148,30 +170,61 @@ public final class OfferNormalizer {
 		);
 	}
 
-	private static void logRejection(
-		int index,
-		Supplier sourceSupplier,
-		OfferCandidate candidate,
-		RuntimeException exception
-	) {
-		if (candidate == null) {
-			log.warn(
-				"Supplier offer candidate rejected: itemIndex={}, sourceSupplier={}, candidateSupplier=UNKNOWN",
-				index,
-				sourceSupplier,
-				exception
-			);
-			return;
+	private static final class RejectionLog<T> {
+
+		private static final int MAX_SAMPLES = 5;
+
+		private final Supplier supplier;
+		private final SearchCallContext context;
+		private final List<T> sourceItems;
+		private final Function<? super T, OfferSourceReference> referenceMapper;
+		private int sampledCount;
+
+		private RejectionLog(Supplier supplier, SearchCallContext context, List<T> sourceItems,
+			Function<? super T, OfferSourceReference> referenceMapper) {
+			this.supplier = supplier;
+			this.context = context;
+			this.sourceItems = sourceItems;
+			this.referenceMapper = referenceMapper;
 		}
-		log.warn(
-			"Supplier offer candidate rejected: itemIndex={}, sourceSupplier={}, candidateSupplier={}, propertyId={}, roomTypeId={}",
-			index,
-			sourceSupplier,
-			candidate.supplier(),
-			candidate.propertyId(),
-			candidate.roomTypeId(),
-			exception
-		);
+
+		private void rejected(int index, OfferCandidate candidate, RuntimeException exception) {
+			Throwable reason = exception instanceof OfferMappingException && exception.getCause() != null
+				? exception.getCause() : exception;
+			rejected(index, candidate == null ? null : candidate.supplier(),
+				candidate == null ? null : candidate.propertyId(),
+				candidate == null ? null : candidate.roomTypeId(),
+				reason.getClass().getSimpleName(), reason.getMessage());
+		}
+
+		private void rejected(int index, Supplier candidateSupplier, Long propertyId, Long roomTypeId,
+			String reasonType, String reason) {
+			if (sampledCount >= MAX_SAMPLES) {
+				return;
+			}
+			OfferSourceReference reference = referenceMapper.apply(sourceItems.get(index));
+			if (reference == null) {
+				reference = OfferSourceReference.unknown();
+			}
+			log.warn(
+				"Supplier offer candidate rejected: sourceSupplier={}, searchId={}, batchIndex={}, itemIndex={}, supplierPropertyCode={}, supplierRoomTypeCode={}, candidateSupplier={}, propertyId={}, roomTypeId={}, reasonType={}, reason={}",
+				supplier, OfferSourceReference.safeText(context.searchId(), 80), context.batchIndex(), index,
+				reference.supplierPropertyCode(), reference.supplierRoomTypeCode(),
+				candidateSupplier == null ? "UNKNOWN" : candidateSupplier, propertyId, roomTypeId,
+				reasonType, OfferSourceReference.safeText(reason, 240)
+			);
+			sampledCount++;
+		}
+
+		private void summary(int rejectedCount) {
+			if (rejectedCount > 0) {
+				log.warn(
+					"Supplier offer rejection summary: sourceSupplier={}, searchId={}, batchIndex={}, rejectedOfferCount={}, sampledCount={}, omittedCount={}",
+					supplier, OfferSourceReference.safeText(context.searchId(), 80), context.batchIndex(),
+					rejectedCount, sampledCount, rejectedCount - sampledCount
+				);
+			}
+		}
 	}
 
 }
