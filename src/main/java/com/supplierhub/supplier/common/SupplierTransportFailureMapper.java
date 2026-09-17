@@ -46,6 +46,9 @@ public final class SupplierTransportFailureMapper {
 		if (isResourceFailure(cause)) {
 			return resourceFailure(supplier, requestDescription, cause);
 		}
+		if (isTimeout(cause)) {
+			return timeoutFailure(supplier, requestDescription, cause);
+		}
 		return new SupplierIntegrationException(
 			supplier, SupplierFailureType.UNKNOWN, false,
 			requestDescription + " response could not be read", cause

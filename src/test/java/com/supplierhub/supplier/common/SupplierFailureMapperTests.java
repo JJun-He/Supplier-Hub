@@ -7,11 +7,14 @@ import com.supplierhub.catalog.domain.Supplier;
 import io.netty.channel.ConnectTimeoutException;
 import io.netty.handler.timeout.ReadTimeoutException;
 import io.netty.handler.timeout.WriteTimeoutException;
+import reactor.netty.internal.shaded.reactor.pool.PoolAcquireTimeoutException;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
+import org.springframework.core.io.buffer.DataBufferLimitException;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatusCode;
@@ -21,6 +24,7 @@ import org.springframework.web.reactive.function.client.WebClientResponseExcepti
 import java.io.IOException;
 import java.net.SocketTimeoutException;
 import java.net.URI;
+import java.time.Duration;
 import java.util.concurrent.TimeoutException;
 import java.util.stream.Stream;
 
@@ -70,6 +74,52 @@ class SupplierFailureMapperTests {
 		assertThat(mapped.getFailureType()).isEqualTo(SupplierFailureType.TIMEOUT);
 		assertThat(mapped.isRetryable()).isTrue();
 		assertThat(mapped.getCause()).isSameAs(requestError);
+	}
+
+	@ParameterizedTest
+	@MethodSource("timeouts")
+	void recognizesNestedTimeoutAfterResponseHeaders(Throwable timeout) {
+		var responseError = responseError(new RuntimeException(timeout));
+		var mapped = SupplierTransportFailureMapper.responseFailure(
+			Supplier.SUPPLIER_A, "test", responseError
+		);
+		assertThat(mapped.getFailureType()).isEqualTo(SupplierFailureType.TIMEOUT);
+		assertThat(mapped.isRetryable()).isTrue();
+		assertThat(mapped.getCause()).isSameAs(responseError);
+	}
+
+	static Stream<Arguments> resourceFailures() {
+		var oversized = new DataBufferLimitException("response too large");
+		oversized.initCause(new TimeoutException());
+		return Stream.of(
+			Arguments.of(oversized, SupplierFailureType.RESPONSE_TOO_LARGE),
+			Arguments.of(
+				new PoolAcquireTimeoutException(Duration.ofMillis(200)),
+				SupplierFailureType.CAPACITY_EXCEEDED
+			)
+		);
+	}
+
+	@ParameterizedTest
+	@MethodSource("resourceFailures")
+	void preservesResourceFailurePriorityOverNestedTimeout(
+		Throwable cause, SupplierFailureType expected
+	) {
+		var responseError = responseError(cause);
+		var mapped = SupplierTransportFailureMapper.responseFailure(
+			Supplier.SUPPLIER_A, "test", responseError
+		);
+		assertThat(mapped.getFailureType()).isEqualTo(expected);
+		assertThat(mapped.isRetryable()).isFalse();
+		assertThat(mapped.getCause()).isSameAs(responseError);
+	}
+
+	private static WebClientResponseException responseError(Throwable cause) {
+		var exception = WebClientResponseException.create(
+			200, "OK", new HttpHeaders(), new byte[0], null
+		);
+		exception.initCause(cause);
+		return exception;
 	}
 
 	@Test
